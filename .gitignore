@@ -47,3 +47,7 @@ customers/
 # Generated docs/artifacts (defensive)
 *.pdf
 *.csv
+
+# Local cache
+.cache/
+guard_angel/.cache/
