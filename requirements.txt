@@ -1,0 +1,12 @@
+python-telegram-bot==21.6
+pydantic==2.8.2
+python-dotenv==1.0.1
+
+PyDrive2>=1.18.2
+PyPDF2>=3.0.0
+fpdf2>=2.7.9
+google-api-python-client>=2.140.0
+pydantic-settings>=2.2.1
+pydantic>=2.7
+python-dotenv>=1.0.1
+python-telegram-bot>=20.6

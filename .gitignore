@@ -1,0 +1,49 @@
+# Virtualenv
+venv/
+
+# Python cache/compiled
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment / secrets
+.env
+*.log
+client_secrets.json
+credentials.json
+service_account*.json
+token*.json
+
+# App-specific
+files_cash/
+signature.png
+geckodriver.log
+
+# Backups & temp files
+*.bak
+*.bak.*
+*.swp
+*~
+
+# Sensitive data
+customers/
+
+# Editors & tooling
+.vscode/
+.idea/
+*.code-workspace
+.pytest_cache/
+.ipynb_checkpoints/
+.mypy_cache/
+
+# OS files
+.DS_Store
+
+# Certs/keys (defensive)
+*.pem
+*.p12
+*.crt
+
+# Generated docs/artifacts (defensive)
+*.pdf
+*.csv
