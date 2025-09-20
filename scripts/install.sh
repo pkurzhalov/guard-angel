@@ -35,7 +35,7 @@ fi
 if [ ! -f "credentials.json" ]; then
   echo
   echo "I don't see credentials.json in the project root."
-  echo "This is your Google **service account** key (JSON) used for Sheets/Drive."
+  echo "This is your Google service account key (JSON) used for Sheets/Drive."
   echo "• If you have it on disk, type its path now and I will copy it here."
   echo "• Otherwise, press Enter to skip and place it later as ./credentials.json"
   read -r -p "Path to credentials.json (blank to skip): " CREDS_PATH || true
@@ -47,34 +47,33 @@ fi
 # ---- Quick env check (non-fatal if credentials.json is missing) ----
 "$PY" - <<'PY'
 import os, sys
+from pathlib import Path
 need = ["BOT_TOKEN","SPREADSHEET_ID","DRIVE_FOLDER_STATEMENTS","AUTHORIZED_USERS"]
 missing = [k for k in need if not os.getenv(k)]
 if missing:
     print("ERROR: Missing required .env keys:", ", ".join(missing))
     sys.exit(1)
+if not Path("credentials.json").exists():
+    print("WARNING: credentials.json is missing. Sheets/Drive will fail until you add it.")
 print("Env looks OK.")
 PY
 
-# ---- First-run setup (org + drivers) ----
+# ---- First-run setup wizard ----
 "$PY" scripts/setup_wizard.py || true
 
-# ---- Import smoke test (warn if creds missing) ----
-if [ ! -f "credentials.json" ]; then
-  echo
-  echo "WARNING: credentials.json still missing."
-  echo "The bot will fail on first run until you place it at ./credentials.json"
-  echo
-fi
-
-"$PY" - <<'PY' || true
-import importlib
-importlib.import_module("guard_angel.bot")
-print("Bot module imports OK.")
+# ---- Import smoke test ----
+set +e
+"$PY" - <<'PY'
+try:
+    import importlib
+    importlib.import_module("guard_angel.bot")
+    print("Bot module imports OK.")
+except Exception as e:
+    print("Bot import warning:", e)
 PY
+set -e
 
 echo
 echo "Install complete."
-echo "Next steps:"
-echo "  1) Ensure ./credentials.json exists (service account key)."
-echo "  2) Share your Google Sheet with the service account's client_email."
-echo "  3) source venv/bin/activate && python -m guard_angel.bot"
+echo "To run the bot:"
+echo "  source venv/bin/activate && $PY -m guard_angel.bot"
