@@ -1,5 +1,6 @@
 from __future__ import print_function # built-in module used to inherit new features in the new Python versions
 #!/usr/bin/python3
+from .cache import load_cache, save_cache
 #sheets.py
 import os
 
@@ -17,25 +18,40 @@ from fpdf import FPDF
 SHEET_ID = settings.spreadsheet_id
 MY_SHEET_ID = SHEET_ID
 
-def get_current_cell(driver_name):
-    if driver_name == 'Yura':
-        n = settings.cell_yura
-    elif driver_name == 'Javier':
-        n = settings.cell_javier
-    elif driver_name == 'Walter':
-        n = settings.cell_walter
-    elif driver_name == 'Nestor':
-        n = settings.cell_nestor
-    else:
-        n = settings.cell_test
-    while True:
-        range = driver_name + '!' + f'A{n}'
-        result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range).execute()
-        cell = result.get('values')
-        if cell != None:
-            n += 1
-        else:
-            return (n - 1)
+
+_last_rows_cache = load_cache()
+
+def _last_row_from_sheet(driver_name: str, column: str = "G") -> int:
+    """
+    Scan a single column (default 'G') from top to bottom and return the
+    last FILLED row index (1-based). Assumes headers in row 1 are allowed.
+    """
+    rng = f"{driver_name}!{column}:{column}"
+    result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=rng).execute()
+    values = result.get("values", [])
+    # Google Sheets API returns only up to the last non-empty row for this column,
+    # so len(values) is the last filled row number (1-based).
+    return len(values)
+
+def refresh_last_row(driver_name: str, column: str = "G") -> int:
+    n = _last_row_from_sheet(driver_name, column)
+    key = f"{driver_name}:{column.upper()}"
+    _last_rows_cache[key] = n
+    save_cache(_last_rows_cache)
+    return n
+
+def get_current_cell(driver_name: str, column: str = "G", refresh: bool = False) -> int:
+    """
+    Return the last filled row (1-based) in the given column for the given sheet tab.
+    Uses a small on-disk cache and refreshes on demand.
+    """
+    key = f"{driver_name}:{column.upper()}"
+    if not refresh and key in _last_rows_cache:
+        try:
+            return int(_last_rows_cache[key])
+        except Exception:
+            pass
+    return refresh_last_row(driver_name, column)
 
 def get_data_for_peter_salary(selected_drivers, start_date_str):
     try:
@@ -137,21 +153,39 @@ def get_last_load(driver_name, row=None):
 
 
 
+
 def get_start_end_dateForCompanyDriversSalary(start_row, driver):
-    # get the current cell (end row) for the driver
-    end_row = get_current_cell(driver)
+    """
+    Determine the salary period for company drivers starting at `start_row`:
 
-    # range for start_date (column A)
-    range_start_date = driver + '!' + f'A{start_row}'
-    result_start_date = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_start_date).execute()
-    start_date = result_start_date.get('values')[0][0]
+    - start_date := column A at `start_row`
+    - end_date   := the LAST non-empty column C in the contiguous block of rows
+                    starting at `start_row` until column A becomes empty.
+    """
+    # read a generous slab below start_row so we don't overfetch repeatedly
+    slab = 300  # plenty for a pay period
+    range_block = f"{driver}!A{start_row}:C{start_row+slab}"
+    result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_block).execute()
+    rows = result.get('values', [])
 
-    # range for end_date (column C)
-    range_end_date = driver + '!' + f'C{end_row}'
-    result_end_date = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_end_date).execute()
-    end_date = result_end_date.get('values')[0][0]
+    if not rows or not rows[0] or not rows[0][0]:
+        raise RuntimeError(f"No start PU date at row {start_row} for {driver}")
 
+    start_date = rows[0][0]
+
+    last_c = None
+    # Walk until first empty A (end of contiguous loads)
+    for r in rows:
+        pu = r[0] if len(r) > 0 else ''
+        if not pu:
+            break
+        cval = r[2] if len(r) > 2 else ''
+        if cval:
+            last_c = cval
+
+    end_date = last_c or start_date
     return start_date, end_date
+
 def get_Start_Finish(quarter, driver):
     now = datetime.datetime.now()
     year = now.strftime("%Y")
@@ -309,10 +343,11 @@ def update_cell(driver, cell, letter, value):
     valueInputOption='RAW', body=Body).execute()
     print("Cell Uploaded successfully✅")
 
-def compilate_salary_company_driver(driver, cell, start_date, end_date):
-    from fpdf import FPDF  # import if needed
 
-    pdf = FPDF('P', 'mm', 'A4')  # create FPDF object
+def compilate_salary_company_driver(driver, cell, start_date, end_date):
+    from fpdf import FPDF
+
+    pdf = FPDF('P', 'mm', 'A4')
     pdf.add_page()
 
     pdf.set_font('helvetica', 'B', 18)
@@ -321,25 +356,19 @@ def compilate_salary_company_driver(driver, cell, start_date, end_date):
         pdf.cell(190, 10, 'Kolobok INC', ln=1, border=False, align='L')
         pdf.cell(190, 10, 'Pay to: Reyes9corp', ln=1, border=False, align='L')
         pdf.cell(190, 10, f'Statement {start_date} - {end_date}', ln=1, border=False, align='L')
-
     elif driver == "Nestor":
         pdf.cell(190, 10, 'Kolobok INC', ln=1, border=False, align='L')
         pdf.cell(190, 10, 'Pay to: LION TRANSPORT LLC', ln=1, border=False, align='L')
         pdf.cell(190, 10, f'Statement {start_date} - {end_date}', ln=1, border=False, align='L')
-
     else:
-        # If there's any other driver, we throw a warning or handle it somehow.
         print('Error, I dont know this driver, please update the code')
 
     pdf.set_font('helvetica', 'B', 14)
     pdf.set_text_color(0, 0, 0)
-
-
     pdf.cell(15, 15, 'Loads Complete:', ln=1, border=False, align='L')
 
     pdf.set_font('helvetica', 'B', 8)
     pdf.set_text_color(0, 0, 0)
-
     pdf.cell(15, 5, 'PU date', ln=0, border=True, align='L')
     pdf.cell(15, 5, 'Del date', ln=0, border=True, align='L')
     pdf.cell(30, 5, 'From:', ln=0, border=True, align='L')
@@ -350,175 +379,117 @@ def compilate_salary_company_driver(driver, cell, start_date, end_date):
     pdf.cell(17, 5, 'Kolobok %', ln=0, border=True, align='L')
     pdf.cell(15, 5, 'Gross - %', ln=1, border=True, align='L')
 
-    # --------------------------
-
-    # Fetch all the data in a single API call
+    # Fetch first row data
     range_data = driver + '!' + f'A{cell}:U{cell}'
     result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_data).execute()
     values = result.get('values')[0]
 
-    pudate = values[0]
-    deldate = values[2]
-    pu = values[4]
-    deliv = values[5]
-    broker = values[6]
-    gross = float(values[9])
-    commision_rate = float(values[20])
-    miles_str = values[10]
-
-    # Convert miles to float if possible, else default to 0
-    try:
-        miles = float(miles_str)
-    except ValueError:
-        miles = 0
-
-    pu = pu[0:24]
-    deliv = deliv[0:24]
-    broker = broker[0:24]
-    commision_rate = commision_rate / 100
-    commision = gross * commision_rate
-    w_gets = gross - commision
-
-    total_loads = 0
+    total_gross = total_miles = total_commission = total_loads = 0
     count = 0
 
-    # New accumulative variables
-    total_gross = 0
-    total_miles = 0
-    total_commission = 0
+    while True:
+        pudate = values[0]
+        deldate = values[2]
+        pu = values[4]
+        deliv = values[5]
+        broker = values[6]
+        gross = float(values[9])
+        commision_rate = float(values[20]) / 100.0
+        miles_str = values[10]
 
-    # Iterate through the rows
-    while gross is not None:
+        def _f(x, n=24): return (x or '')[:n]
+        pu, deliv, broker = _f(pu), _f(deliv), _f(broker)
+        try: miles = float(miles_str)
+        except Exception: miles = 0.0
+
+        commision = gross * commision_rate
+        w_gets = gross - commision
+
         pdf.set_font('helvetica', '', 7)
         pdf.set_text_color(0, 0, 0)
-
-        # check text, so it won't overlap
-        def check_chars(input_text, length):
-            if len(input_text) > length:
-                final_text = input_text[:length - 1]
-            else:
-                final_text = input_text
-            return final_text
-
+        def check_chars(t, n): return t[:n-1] if len(t) > n else t
         pdf.cell(15, 5, pudate, ln=0, border=True, align='L')
         pdf.cell(15, 5, deldate, ln=0, border=True, align='L')
         pdf.cell(30, 5, check_chars(pu, 20), ln=0, border=True, align='L')
         pdf.cell(30, 5, check_chars(deliv, 20), ln=0, border=True, align='L')
         pdf.cell(30, 5, check_chars(broker, 20), ln=0, border=True, align='L')
-        pdf.cell(15, 5, str(gross)[:9], ln=0, border=True, align='L')
-        pdf.cell(10, 5, str(miles), ln=0, border=True, align='L')
-        pdf.cell(17, 5, str(commision)[:9], ln=0, border=True, align='L')
-        pdf.cell(15, 5, str(w_gets)[:9], ln=1, border=True, align='L')
-        print(pudate, deldate, pu, deliv, broker, gross, miles, commision, w_gets)
+        pdf.cell(15, 5, str(round(gross, 2))[:9], ln=0, border=True, align='L')
+        pdf.cell(10, 5, str(round(miles, 2)), ln=0, border=True, align='L')
+        pdf.cell(17, 5, str(round(commision, 2))[:9], ln=0, border=True, align='L')
+        pdf.cell(15, 5, str(round(w_gets, 2))[:9], ln=1, border=True, align='L')
 
-        # Update accumulative totals
         total_gross += gross
         total_miles += miles
         total_commission += commision
         total_loads += w_gets
-
         count += 1
         cell += 1
 
-        # Fetch the next row data
-        range_data = driver + '!' + f'A{cell}:U{cell}'
-        result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_data).execute()
-        try:
+        range_next = driver + '!' + f'A{cell}:U{cell}'
+        result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_next).execute()
+        if 'values' in result:
             values = result.get('values')[0]
-            pudate = values[0]
-            deldate = values[2]
-            pu = values[4]
-            deliv = values[5]
-            broker = values[6]
-            gross = float(values[9])
-            commision_rate = float(values[20])
-            miles_str = values[10]
-
-            # Convert miles to float if possible, else default to 0
-            try:
-                miles = float(miles_str)
-            except ValueError:
-                miles = 0
-
-            pu = pu[0:24]
-            deliv = deliv[0:24]
-            broker = broker[0:24]
-            commision_rate = commision_rate / 100
-            commision = gross * commision_rate
-            w_gets = gross - commision
-        except TypeError:
+        else:
             break
 
-    # Print summary row after loads table
+    # Totals row
     pdf.set_font('helvetica', 'B', 8)
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(15, 5, '', ln=0, border=True, align='L')  # PU date empty
-    pdf.cell(15, 5, '', ln=0, border=True, align='L')  # Del date empty
-    pdf.cell(30, 5, '', ln=0, border=True, align='L')  # From:
-    pdf.cell(30, 5, '', ln=0, border=True, align='L')  # To:
+    pdf.cell(15, 5, '', ln=0, border=True, align='L')
+    pdf.cell(15, 5, '', ln=0, border=True, align='L')
+    pdf.cell(30, 5, '', ln=0, border=True, align='L')
+    pdf.cell(30, 5, '', ln=0, border=True, align='L')
     pdf.cell(30, 5, 'Totals:', ln=0, border=True, align='R')
-    pdf.cell(15, 5, str(round(total_gross, 2))[:9], ln=0, border=True, align='L')  # Sum of Gross
-    pdf.cell(10, 5, str(round(total_miles, 2))[:9], ln=0, border=True, align='L')  # Sum of Miles
-    pdf.cell(17, 5, str(round(total_commission, 2))[:9], ln=0, border=True, align='L')  # Sum of Kolobok %
-    pdf.cell(15, 5, str(round(total_loads, 2))[:9], ln=1, border=True, align='L')  # Sum of net earnings (Gross - %)
+    pdf.cell(15, 5, str(round(total_gross, 2))[:9], ln=0, border=True, align='L')
+    pdf.cell(10, 5, str(round(total_miles, 2))[:9], ln=0, border=True, align='L')
+    pdf.cell(17, 5, str(round(total_commission, 2))[:9], ln=0, border=True, align='L')
+    pdf.cell(15, 5, str(round(total_loads, 2))[:9], ln=1, border=True, align='L')
 
     total_loads_str = str(round(total_loads, 2))
     pdf.set_font('helvetica', 'B', 14)
     pdf.set_text_color(0, 0, 0)
     pdf.set_fill_color(232, 253, 226)
     pdf.cell(177, 15, f'Total for loads: ${total_loads_str}', ln=1, border=False, align='L', fill=True)
+
+    # Extra charges (Z/AA backtracking)
     extra_charges = {}
     while count != 0:
-        # counting extra charges
         try:
             range_ex_charge = driver + '!' + f'Z{cell}'
-            result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_ex_charge).execute()
-            ex_charge = float(result.get('values')[0][0])
-            range_ex_charge_explanation = driver + '!' + f'AA{cell}'
-            result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_ex_charge_explanation).execute()
-            ex_charge_explanation = result.get('values')[0][0]
-            extra_charges[ex_charge_explanation] = ex_charge
-            cell -= 1
-            count -= 1
+            res1 = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_ex_charge).execute()
+            ex_charge = float(res1.get('values')[0][0])
 
+            range_ex_exp = driver + '!' + f'AA{cell}'
+            res2 = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_ex_exp).execute()
+            ex_exp = res2.get('values')[0][0]
+
+            extra_charges[ex_exp] = ex_charge
+            cell -= 1; count -= 1
         except TypeError:
-            cell -= 1
-            count -= 1
+            cell -= 1; count -= 1
             continue
 
-    extra_charges_total = 0
-    extra_charges_total_string = ''
-
-    for key, value in extra_charges.items():
-        extra_charge = float(value)
-        extra_charges_explanation = key
-        extra_charges_total += extra_charge
-        if extra_charge < 0:
-            extra_charge = extra_charge * (-1)
-            extra_charges_total_string += f"+ ${extra_charge}"
-        else:
-            extra_charges_total_string += f"- ${extra_charge}"
-
-        extra_charge_perc = (((extra_charge * 100) / float(total_loads_str)) / 100) * 177
+    extra_total = 0
+    extra_line = ''
+    for label, val in extra_charges.items():
+        v = float(val); extra_total += v
+        shown = abs(v)
+        extra_line += f"{'+ ' if v<0 else '- '}${shown:.2f} "
+        perc = (((shown * 100) / float(total_loads_str)) / 100) * 177
         pdf.set_font('helvetica', '', 12)
         pdf.set_text_color(0, 0, 0)
-        pdf.cell(177, 10, f'{extra_charges_explanation}: ${extra_charge}', ln=1, border=False, align='L', fill=False)
+        pdf.cell(177, 10, f'{label}: ${shown:.2f}', ln=1, border=False, align='L', fill=False)
         pdf.set_font('helvetica', 'B', 14)
         pdf.set_text_color(0, 0, 0)
-        if float(value) < 0:
-            pdf.set_fill_color(85, 252, 37)
-        else:
-            pdf.set_fill_color(252, 66, 37)
-        pdf.cell(extra_charge_perc, 0.5, '', ln=1, border=False, align='L', fill=True)
-    extra_charges_total_string = extra_charges_total_string
-    print('Extra charges total: ', extra_charges_total)
+        if v < 0: pdf.set_fill_color(85, 252, 37)
+        else:     pdf.set_fill_color(252, 66, 37)
+        pdf.cell(perc, 0.5, '', ln=1, border=False, align='L', fill=True)
 
     pdf.set_font('helvetica', 'B', 14)
     pdf.set_text_color(0, 0, 0)
-    pdf.cell(15, 15, f'Final pay: ${total_loads_str} {extra_charges_total_string}', ln=1,
-             border=False, align='L')
+    pdf.cell(15, 15, f'Final pay: ${total_loads_str} {extra_line.strip()}', ln=1, border=False, align='L')
 
-    settlement = float(total_loads_str) - extra_charges_total
+    settlement = float(total_loads_str) - extra_total
     settlement = float('{:.3f}'.format(settlement))
     settlement_str = str(settlement)
     pdf.set_font('helvetica', 'B', 14)
@@ -528,8 +499,8 @@ def compilate_salary_company_driver(driver, cell, start_date, end_date):
 
     pdf.set_font('helvetica', '', 8)
     pdf.set_text_color(0, 0, 0)
+    pdf.output('./files_cash/1st_page.pdf')
 
-    pdf.output(f'./files_cash/1st_page.pdf')
 
 def compilate_salary_page(driver, cell, start_date, end_date, totals, discount, insurance, insurance_d, trailer, trailer_d):
     pdf = FPDF('P', 'mm', 'A4')  # create FPDF object
