@@ -3,18 +3,20 @@ from __future__ import annotations
 import os, subprocess, time
 from pathlib import Path
 
-KOLOBOK_DIR = os.getenv("KOLOBOK_DIR", "/home/chris/Documents/kolobok_june_2024")
-KOLOBOK_PY = os.path.join(KOLOBOK_DIR, "venv", "bin", "python")
-PYTHON = KOLOBOK_PY if os.path.exists(KOLOBOK_PY) else "python"
+KOLOBOK_DIR = os.getenv("KOLOBOK_DIR")
+KOLOBOK_PY = (os.path.join(KOLOBOK_DIR, "venv", "bin", "python") if KOLOBOK_DIR else None)
+PYTHON = (KOLOBOK_PY if (KOLOBOK_PY and os.path.exists(KOLOBOK_PY)) else "python")
 
 def _ensure_dir() -> Path:
     p = Path(KOLOBOK_DIR)
+    if not KOLOBOK_DIR:
+        raise RuntimeError("KOLOBOK_DIR is not set")
     if not p.exists():
-        raise RuntimeError(f"KOLOBOK_DIR does not exist: {KOLOBOK_DIR}")
+        raise RuntimeError("KOLOBOK_DIR is invalid or not accessible")
     return p
 
 def _fmt(cmd, out, err, code):
-    head = f"$ {' '.join(cmd) if isinstance(cmd, list) else cmd} (exit {code})"
+    head = f"$ { (cmd[0] if isinstance(cmd, list) else str(cmd)) } (exit {code})"
     body = []
     if out: body.append("stdout:\n" + out.strip())
     if err: body.append("stderr:\n" + err.strip())
@@ -76,7 +78,7 @@ def run_count_salary() -> str:
         out = te.stdout or ""
         err = (te.stderr or "") + "\n[Timeout] Legacy count_salary.py exceeded 120s.\n"
         err += "If this was waiting for Google OAuth, run it once manually to cache credentials:\n"
-        err += f"  {PYTHON} count_salary.py  (cwd={KOLOBOK_DIR})\n"
+        err += "  (activate legacy venv) && python count_salary.py\n"
         return _fmt(["count_salary.py"], out, err, code:=124)
     except Exception as e:
         return f"run_count_salary failed: {e}"

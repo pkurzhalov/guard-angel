@@ -1,55 +1,67 @@
-from __future__ import annotations
+import os
 from datetime import datetime
-from typing import List
-from pydantic import Field
-from pydantic_settings import BaseSettings
-from dotenv import load_dotenv
+from typing import List, Dict
+from pydantic import Field, model_validator
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from dotenv import load_dotenv, find_dotenv
 
-from dotenv import find_dotenv
-# Force-load project .env with override=True
-load_dotenv(find_dotenv(usecwd=True), override=True)
+load_dotenv(find_dotenv(usecwd=True))
 
 class Settings(BaseSettings):
-    # Telegram
+    model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
+    
     bot_token: str = Field(..., alias="BOT_TOKEN")
-    authorized_users_raw: str = Field("", alias="AUTHORIZED_USERS")  # <-- keep as string
-
-    # Google
+    authorized_users_raw: str = Field(..., alias="AUTHORIZED_USERS")
     spreadsheet_id: str = Field(..., alias="SPREADSHEET_ID")
-    drive_folder_statements: str = Field(..., alias="DRIVE_FOLDER_STATEMENTS")
+    drive_folder_id: str = Field(..., alias="DRIVE_FOLDER_ID")
+    company_name: str = Field(..., alias="COMPANY_NAME")
+    company_address: str = Field(..., alias="COMPANY_ADDRESS")
+    company_phone: str = Field(..., alias="COMPANY_PHONE")
+    company_email: str = Field(..., alias="COMPANY_EMAIL")
+    company_payee_name: str = Field(..., alias="COMPANY_PAYEE_NAME")
+    company_bank_name: str = Field(..., alias="COMPANY_BANK_NAME")
+    company_bank_phone: str = Field(..., alias="COMPANY_BANK_PHONE")
+    company_routing_number: str = Field(..., alias="COMPANY_ROUTING_NUMBER")
+    company_account_number: str = Field(..., alias="COMPANY_ACCOUNT_NUMBER")
+    drivers_owner_operator_raw: str = Field("", alias="DRIVERS_OWNER_OPERATOR")
+    drivers_company_raw: str = Field("", alias="DRIVERS_COMPANY")
+    kolobok_dir: str | None = Field(None, alias="KOLOBOK_DIR")
+    smtp_user: str = Field(..., alias="SMTP_USER")
+    smtp_password: str = Field(..., alias="SMTP_PASSWORD")
+    signature_img_path: str = Field(..., alias="SIGNATURE_IMG_PATH")
+    
+    signature_coords_x: int = Field(50, alias="SIGNATURE_COORDS_X")
+    signature_coords_y: int = Field(80, alias="SIGNATURE_COORDS_Y")
+    signature_scale: float = Field(0.3, alias="SIGNATURE_SCALE")
+    date_coords_x: int = Field(200, alias="DATE_COORDS_X")
+    date_coords_y: int = Field(95, alias="DATE_COORDS_Y")
+    custom_text_coords_x: int = Field(300, alias="CUSTOM_TEXT_COORDS_X")
+    custom_text_coords_y: int = Field(95, alias="CUSTOM_TEXT_COORDS_Y")
 
-    # Salary logic
-    trailer_payment: int = Field(500, alias="TRAILER_PAYMENT")
-    insurance_cutoff: str = Field("06/30/2023", alias="INSURANCE_CUTOFF")
+    owner_operators: List[str] = []; company_drivers: List[str] = []
+    insurance_rates: Dict[str, int] = {}; trailer_rates: Dict[str, int] = {}
+    pay_to_map: Dict[str, str] = {}; invoice_address_block: str = ""
 
-    # Start rows
-    cell_yura: int = Field(205, alias="CELL_YURA")
-    cell_walter: int = Field(534, alias="CELL_WALTER")
-    cell_denis: int = Field(63, alias="CELL_DENIS")
-    cell_test: int = Field(28, alias="CELL_TEST")
-    cell_javier: int = Field(9, alias="CELL_JAVIER")
-    cell_nestor: int = Field(67, alias="CELL_NESTOR")
+    @model_validator(mode='after')
+    def process_dynamic_data(self) -> 'Settings':
+        self.owner_operators = [d.strip() for d in self.drivers_owner_operator_raw.split(',') if d.strip()]
+        self.company_drivers = [d.strip() for d in self.drivers_company_raw.split(',') if d.strip()]
+        all_drivers = self.owner_operators + self.company_drivers
+        for driver in all_drivers:
+            if driver in self.owner_operators:
+                ins_rate = os.getenv(f"INSURANCE_WEEKLY_{driver.upper()}"); trl_rate = os.getenv(f"TRAILER_PAYMENT_WEEKLY_{driver.upper()}")
+                if ins_rate and ins_rate.isdigit(): self.insurance_rates[driver] = int(ins_rate)
+                if trl_rate and trl_rate.isdigit(): self.trailer_rates[driver] = int(trl_rate)
+            payee = os.getenv(f"PAY_TO_{driver.upper()}"); 
+            if payee: self.pay_to_map[driver] = payee
+        address = self.company_address.replace('\\n', '\n')
+        self.invoice_address_block = (f"{self.company_name}\n{address}\n{self.company_phone}\n{self.company_email}")
+        return self
 
-    # helpers
     @property
     def authorized_users(self) -> List[int]:
-        return [int(x) for x in self.authorized_users_raw.split(",") if x.strip().isdigit()]
-
-    def get_start_row(self, driver: str) -> int:
-        return {
-            "Yura": self.cell_yura,
-            "Walter": self.cell_walter,
-            "Denis": self.cell_denis,
-            "Javier": self.cell_javier,
-            "Nestor": self.cell_nestor,
-        }.get(driver, self.cell_test)
-
-    def get_insurance_pay(self, driver: str, date: datetime) -> int:
-        cutoff = datetime.strptime(self.insurance_cutoff, "%m/%d/%Y")
-        if date <= cutoff:
-            return 292
-        if driver in ("Nestor", "Javier", "Walter"):
-            return 292
-        raise ValueError(f"Unknown driver for insurance: {driver}")
+        return [int(x) for x in self.authorized_users_raw.split(',') if x.strip().isdigit()]
+    def get_insurance_pay(self, driver: str) -> int: return self.insurance_rates.get(driver, 0)
+    def get_trailer_pay(self, driver: str) -> int: return self.trailer_rates.get(driver, 0)
 
 settings = Settings()

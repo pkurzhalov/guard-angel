@@ -2,33 +2,37 @@ Guard Angel Bot
 
 Telegram bot that compiles salary statements from Google Sheets and uploads PDFs to Drive.
 
-Quick Start
-1) Clone and enter the project:
-   git clone git@github.com:YOUR_GH_USER/guard-angel.git
-   cd guard-angel
+Prereqs (Ubuntu/Debian)
+- git, python3, python3-venv, python3-pip
+  sudo apt update && sudo apt install -y git python3 python3-venv python3-pip
 
-2) Create venv and install deps:
-   python -m venv venv && source venv/bin/activate
-   pip install -r requirements.txt
+Clone
+# HTTPS (easiest)
+git clone https://github.com/pkurzhalov/guard-angel.git
+cd guard-angel
 
-3) Create .env from template and fill it:
-   cp .env.example .env
-   # Edit .env and set:
-   # - BOT_TOKEN (Telegram bot token)
-   # - AUTHORIZED_USERS (comma-separated Telegram user IDs)
-   # - SPREADSHEET_ID (Google Sheet ID)
-   # - DRIVE_FOLDER_STATEMENTS (Google Drive folder ID for PDFs)
+# (Optional) SSH – set up an SSH key with GitHub first
+# git clone git@github.com:pkurzhalov/guard-angel.git
 
-4) First-run config (local only, ignored by git):
-   # Enter YOUR company name + address (street, city/state/zip) and
-   # a mapping of Google Sheet tab name -> driver's company info.
-   python scripts/setup_wizard.py
+Install
+./scripts/install.sh
+- This will:
+  * create a venv and install dependencies,
+  * prompt you to edit .env (BOT_TOKEN, AUTHORIZED_USERS, SPREADSHEET_ID, DRIVE_FOLDER_STATEMENTS),
+  * optionally copy your Google credentials.json if you provide its path,
+  * run a first-run wizard to store your org + driver company info in .cache/org_config.json.
 
-5) Run the bot:
-   source venv/bin/activate
-   python -m guard_angel.bot
+Google Setup (once)
+1) Create a Service Account in Google Cloud and download its key JSON as credentials.json.
+2) Enable APIs: Google Sheets API and Google Drive API.
+3) Share your Google Spreadsheet with the service account’s client_email (read/write).
+4) Place credentials.json in the project root (next to .env).
+
+Run
+source venv/bin/activate
+python -m guard_angel.bot
 
 Notes
-- Driver starting rows are auto-detected by scanning column G; results are cached in .cache/last_rows.json.
-- Sensitive org/driver data lives in .cache/org_config.json (git-ignored).
-- Keep client_secrets/credentials tokens out of git (see .gitignore).
+- Driver starting rows are auto-detected by scanning column G; results cached at .cache/last_rows.json.
+- Org/driver private info: .cache/org_config.json (git-ignored).
+- Keep client_secrets.json / credentials.json out of git (already in .gitignore).

@@ -1,197 +1,169 @@
 from __future__ import annotations
-
 import os
 import re
 from datetime import datetime
-from typing import Optional, Tuple
-
+from typing import Dict, Any
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    CallbackQueryHandler,
-    CommandHandler,
-    ConversationHandler,
-    ContextTypes,
-    MessageHandler,
-    filters,
+    CallbackQueryHandler, CommandHandler, ConversationHandler,
+    ContextTypes, MessageHandler, filters
 )
-
 from PyPDF2 import PdfReader, PdfMerger
-
 from ..config import settings
 from ..services import sheets
 
-# Conversation states
-CHOOSE_DRIVER, ENTER_CELL, INSURANCE_DATE, WAIT_STATEMENT_PDF = range(4)
+STATE_CHOOSE_DRIVER, STATE_ENTER_CELL, STATE_INSURANCE_DATE, STATE_WAIT_STATEMENT_PDF = range(4)
+COMPANY_DRIVERS = settings.company_drivers
+OWNER_OPERATORS = settings.owner_operators
 
+def _cleanup_files(context: ContextTypes.DEFAULT_TYPE):
+    for fp in context.user_data.get("temp_files", []):
+        try: os.remove(fp)
+        except OSError: pass
 
-# -------------------------
-# Guards & helpers
-# -------------------------
-async def _guard(update: Update) -> bool:
-    uid = update.effective_user.id if update.effective_user else None
-    if uid not in settings.authorized_users:
-        if update.message:
-            await update.message.reply_text("You are not authorized to use this bot.")
-        elif update.callback_query:
-            await update.callback_query.answer("Not authorized", show_alert=True)
-        return False
-    return True
+async def start_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    context.user_data.clear()
+    drivers = settings.owner_operators + settings.company_drivers
+    kb = [[InlineKeyboardButton(d, callback_data=f"driver:{d}")] for d in drivers]
+    kb.append([InlineKeyboardButton("Cancel", callback_data="action:cancel")])
+    text = "Please choose a driver:"
+    if update.message: await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
+    elif update.callback_query: await update.callback_query.answer(); await update.callback_query.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
+    return STATE_CHOOSE_DRIVER
 
-def _parse_mmddyyyy(s: str) -> datetime:
-    return datetime.strptime(s.strip(), "%m/%d/%Y")
+async def restart(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    _cleanup_files(context); context.user_data.clear()
+    await update.message.reply_text("Operation cancelled. Send /start to see the main menu.")
+    return ConversationHandler.END
 
-# -------------------------
-# PDF helpers (owner-ops)
-# -------------------------
-def _extract_totals(p: str) -> Optional[float]:
-    with open(p, "rb") as f:
-        page = PdfReader(f).pages[0]
-        for line in (page.extract_text() or "").splitlines():
-            if re.match(r"Totals (\d[\d,\.]*)", line):
-                return float(line.split()[1].replace(",", ""))
-    return None
+async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    _cleanup_files(context); context.user_data.clear()
+    q = update.callback_query; await q.answer()
+    await q.edit_message_text("Operation cancelled. Send /start to see the main menu.")
+    return ConversationHandler.END
 
-def _extract_discount(p: str) -> Optional[float]:
-    with open(p, "rb") as f:
-        page = PdfReader(f).pages[0]
-        for line in (page.extract_text() or "").splitlines():
-            if re.match(r"Total Discount (\d[\d,\.]*)", line):
-                return float(line.split()[2].replace(",", ""))
-    return None
-
-def _extract_dates(p: str) -> Tuple[Optional[str], Optional[str]]:
-    with open(p, "rb") as f:
-        page = PdfReader(f).pages[0]
-        for line in (page.extract_text() or "").splitlines():
-            if re.match(r"Transaction Date\d{4}-\d{2}-\d{2}", line):
-                dates = re.findall(r"\d{4}-\d{2}-\d{2}", line)
-                if len(dates) >= 2:
-                    # old logic: last as start, first as end
-                    return dates[-1], dates[0]
-    return None, None
-
-# -------------------------
-# Conversation handlers
-# -------------------------
-async def start(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _guard(update):
-        return ConversationHandler.END
-
-    kb = [
-        [
-            InlineKeyboardButton("Yura", callback_data="driver:Yura"),
-            InlineKeyboardButton("Walter", callback_data="driver:Walter"),
-            InlineKeyboardButton("Nestor", callback_data="driver:Nestor"),
-        ],
-        [
-            InlineKeyboardButton("Javier", callback_data="driver:Javier"),
-            InlineKeyboardButton("Peter", callback_data="driver:Peter"),
-        ],
-    ]
-    text = "Choose a driver/tab to count salary:"
-    if update.message:
-        await update.message.reply_text(text, reply_markup=InlineKeyboardMarkup(kb))
-    else:
-        q = update.callback_query; await q.answer()
-        await q.edit_message_text(text, reply_markup=InlineKeyboardMarkup(kb))
-    return CHOOSE_DRIVER
-
-async def pick_driver(update: Update, context: ContextTypes.DEFAULT_TYPE):
+async def handle_driver_choice(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     q = update.callback_query; await q.answer()
     driver = q.data.split(":", 1)[1]
     context.user_data["driver"] = driver
-    await q.edit_message_text(f"Driver: {driver}\n\nSend row number (cell) to process:")
-    return ENTER_CELL
+    await q.edit_message_text(f"Driver set to **{driver}**.\n\nPlease send the starting row number.", parse_mode="Markdown")
+    return STATE_ENTER_CELL
 
-
-async def enter_cell(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    if not await _guard(update):
-        return ConversationHandler.END
-
-    txt = (update.message.text or '').strip()
-    try:
-        row = int(txt)
-        if row <= 0:
-            raise ValueError
-    except Exception:
-        return await update.message.reply_text('Enter a positive row number (e.g., 215).')
-
-    driver = context.user_data.get('driver')
-    await update.message.reply_text(f'Processing salary for {driver} row {row}…')
-
-    # Try to detect period from sheet (works for company drivers)
-    start_date = end_date = None
-    try:
-        start_date, end_date = sheets.get_start_end_dateForCompanyDriversSalary(row, driver)
-        await update.message.reply_text(f'🗓 Period detected:\nStart: {start_date}\nEnd:   {end_date}')
-    except Exception as e:
-        await update.message.reply_text(f'⚠️ Could not detect start/end dates: {e}')
-
-    # Company drivers -> build/upload statement natively (ported from legacy)
-    if driver in ('Walter', 'Nestor'):
-        try:
-            from pathlib import Path
-            Path('./files_cash').mkdir(exist_ok=True)
-
-            start_val = (start_date or '').replace('/', '-')
-            end_val   = (end_date or '').replace('/', '-')
-
-            # Build first page
-            sheets.compilate_salary_company_driver(driver, row, start_date=start_val, end_date=end_val)
-
-            # Merge single page to final filename (keeps legacy naming)
-            from PyPDF2 import PdfMerger
-            merger = PdfMerger()
-            merger.append('./files_cash/1st_page.pdf')
-            out_name = f'Statement_{driver}_{end_val or "period"}.pdf'
-            merger.write(out_name)
-            merger.close()
-
-            # Cleanup temp pages
-            import os
-            for f in os.listdir('./files_cash'):
-                try: os.remove(f'./files_cash/' + f)
-                except Exception: pass
-
-            # Upload to Drive + update sheet like legacy
-            sheets.upload_file(file_name=out_name, driver_name=driver, cell=row)
-            sheets.update_cell(driver=driver, cell=row, letter='Y', value='no insurance')
-
-            # Pull the link from the row and send a button + attach PDF
-            Load = sheets.open_invoice_load(driver, row)
-            statement_url = Load[0][23] if Load and Load[0] and len(Load[0]) > 23 else None
-            if statement_url:
-                kb = [[InlineKeyboardButton('👉 Statement🔍👈', url=statement_url)]]
-                await update.message.reply_text('Please check the Statement\n\n/start', reply_markup=InlineKeyboardMarkup(kb))
-
-            try:
-                with open(out_name, 'rb') as doc:
-                    await update.message.reply_document(document=doc)
-            except Exception as e:
-                await update.message.reply_text(f'Could not attach PDF: {e}')
-            try:
-                os.remove(out_name)
-            except Exception:
-                pass
-        except Exception as e:
-            await update.message.reply_text(f'❌ Salary build/upload failed: {e}')
-    else:
-        # Owner-operator path still uses uploaded fuel PDF; we can wire it next.
-        await update.message.reply_text('Owner-operator flow (fuel PDF) not wired yet in this step.')
-
-    await update.message.reply_text('✅ Done.')
+async def handle_cell_entry(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try: cell = int(update.message.text)
+    except (ValueError, TypeError): return STATE_ENTER_CELL
+    context.user_data["cell"] = cell; driver = context.user_data["driver"]
+    await update.message.reply_text(f"Starting at row **{cell}** for **{driver}**.", parse_mode="Markdown")
+    if driver in COMPANY_DRIVERS: return await process_company_driver_salary(update, context)
+    elif driver in OWNER_OPERATORS:
+        await update.message.reply_text("Owner-Operator: Provide insurance end date (`MM/DD/YYYY`)")
+        return STATE_INSURANCE_DATE
     return ConversationHandler.END
 
+async def handle_insurance_date(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    try: insurance_end_date = datetime.strptime(update.message.text, "%m/%d/%Y")
+    except ValueError:
+        await update.message.reply_text("Invalid date format. Please use `MM/DD/YYYY`.")
+        return STATE_INSURANCE_DATE
+    driver = context.user_data["driver"]; cell = context.user_data["cell"]
+    try:
+        prev_insurance_date = datetime.strptime(sheets.open_prev_insurance(driver, cell)[0].split('-')[1], "%m/%d/%Y")
+        diff_days = (insurance_end_date - prev_insurance_date).days
+        if diff_days < 0:
+            await update.message.reply_text("End date cannot be before the previous period's end date.")
+            return STATE_INSURANCE_DATE
+        weeks = (diff_days // 7) + (1 if diff_days % 7 > 0 else 0)
+        context.user_data["insurance_payment"] = weeks * settings.get_insurance_pay(driver)
+        context.user_data["trailer_payment"] = weeks * settings.get_trailer_pay(driver)
+        context.user_data["insurance_period_str"] = f"{prev_insurance_date.strftime('%m/%d/%Y')}-{insurance_end_date.strftime('%m/%d/%Y')}"
+        await update.message.reply_text(f"Calculated **{weeks}** week(s) of deductions.\n\n**Please upload the fuel statement PDF**.", parse_mode="Markdown")
+        return STATE_WAIT_STATEMENT_PDF
+    except Exception as e:
+        await update.message.reply_text(f"Error calculating insurance: {e}.\nCancelling.")
+        return ConversationHandler.END
+
+def extract_from_fuel_pdf(pdf_path: str) -> Dict[str, Any]:
+    results = {"totals": 0.0, "discount": 0.0, "start_date": None, "end_date": None}
+    try:
+        with open(pdf_path, "rb") as f:
+            reader = PdfReader(f)
+            page_text = reader.pages[0].extract_text() or ""
+            for line in page_text.splitlines():
+                if match := re.match(r"Totals (\d[\d,\.]*)", line): results["totals"] = float(match.group(1).replace(",", ""))
+                elif match := re.match(r"Total Discount (\d[\d,\.]*)", line): results["discount"] = float(match.group(1).replace(",", ""))
+                elif re.match(r"Transaction Date\d{4}-\d{2}-\d{2}", line):
+                    dates = re.findall(r"\d{4}-\d{2}-\d{2}", line)
+                    if len(dates) >= 2: results["start_date"], results["end_date"] = dates[-1], dates[0]
+    except Exception as e: print(f"Error extracting from fuel PDF: {e}")
+    return results
+
+async def handle_fuel_statement(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    pdf_file = await update.message.document.get_file()
+    fuel_pdf_path = f"./files_cash/fuel_statement_{update.effective_user.id}.pdf"
+    context.user_data.setdefault("temp_files", []).append(fuel_pdf_path)
+    os.makedirs(os.path.dirname(fuel_pdf_path), exist_ok=True)
+    await pdf_file.download_to_drive(fuel_pdf_path)
+    await update.message.reply_text("Fuel statement received, processing...")
+    fuel_data = extract_from_fuel_pdf(fuel_pdf_path)
+    context.user_data.update(fuel_data)
+    return await process_owner_operator_salary(update, context, fuel_pdf_path)
+
+async def process_company_driver_salary(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
+    driver = context.user_data["driver"]; cell = context.user_data["cell"]
+    try:
+        final_pdf_name = f"Statement_{driver}_{datetime.now().strftime('%m-%d-%Y')}.pdf"
+        context.user_data.setdefault("temp_files", []).extend(["./files_cash/1st_page.pdf", final_pdf_name])
+        sheets.compilate_salary_company_driver(driver, cell, "", "")
+        os.rename("./files_cash/1st_page.pdf", final_pdf_name)
+        await update.message.reply_text("Uploading to Google Drive...")
+        sheets.upload_file(final_pdf_name, driver, cell)
+        sheets.update_cell(driver, cell, 'Y', 'no insurance')
+        with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
+        await update.message.reply_text("✅ Statement created!")
+    except Exception as e: await update.message.reply_text(f"❌ An error occurred: {e}")
+    finally: _cleanup_files(context); return ConversationHandler.END
+
+async def process_owner_operator_salary(update: Update, context: ContextTypes.DEFAULT_TYPE, fuel_pdf_path: str) -> int:
+    ud = context.user_data
+    driver, cell = ud["driver"], ud["cell"]
+    try:
+        await update.message.reply_text("Generating final statement PDF...")
+        sheets.compilate_salary_page(
+            driver=driver, cell=cell, 
+            fuel_start_date=ud.get("start_date"), fuel_end_date=ud.get("end_date"),
+            totals=ud.get("totals", 0), discount=ud.get("discount", 0),
+            insurance=ud.get("insurance_payment", 0), insurance_d=ud.get("insurance_period_str", ""),
+            trailer=ud.get("trailer_payment", 0), trailer_d=f"Trailer Payment for {driver}"
+        )
+        first_page_path = "./files_cash/1st_page.pdf"
+        final_pdf_name = f"Statement_{driver}_{datetime.now().strftime('%m-%d-%Y')}.pdf"
+        ud.setdefault("temp_files", []).extend([first_page_path, final_pdf_name])
+        merger = PdfMerger()
+        merger.append(first_page_path)
+        merger.append(fuel_pdf_path)
+        merger.write(final_pdf_name)
+        merger.close()
+        
+        await update.message.reply_text("Uploading to Google Drive...")
+        sheets.upload_file(final_pdf_name, driver, cell)
+        sheets.update_cell(driver, cell, 'Y', ud["insurance_period_str"])
+        
+        with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
+        await update.message.reply_text("✅ Owner-Operator Statement created!")
+    except Exception as e:
+        await update.message.reply_text(f"❌ An error occurred during final processing: {e}")
+    finally:
+        _cleanup_files(context)
+        return ConversationHandler.END
 
 def handler() -> ConversationHandler:
     return ConversationHandler(
-        
-        entry_points=[CommandHandler("count_salary", start), CallbackQueryHandler(start, pattern="^act:count_salary$")],
+        entry_points=[CommandHandler("count_salary", start_conversation), CallbackQueryHandler(start_conversation, pattern="^act:count_salary$")],
         states={
-            CHOOSE_DRIVER: [CallbackQueryHandler(pick_driver, pattern=r"^driver:.+")],
-            ENTER_CELL: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_cell)],
-            INSURANCE_DATE: [MessageHandler(filters.TEXT & ~filters.COMMAND, enter_cell)],  # keep placeholder
-            WAIT_STATEMENT_PDF: [MessageHandler(filters.Document.PDF, enter_cell)],         # keep placeholder
+            STATE_CHOOSE_DRIVER: [CallbackQueryHandler(handle_driver_choice, pattern=r"^driver:.+")],
+            STATE_ENTER_CELL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_cell_entry)],
+            STATE_INSURANCE_DATE: [MessageHandler(filters.Regex(r'^\d{1,2}/\d{1,2}/\d{4}$'), handle_insurance_date)],
+            STATE_WAIT_STATEMENT_PDF: [MessageHandler(filters.Document.PDF, handle_fuel_statement)],
         },
-        fallbacks=[CommandHandler("cancel", lambda u, c: ConversationHandler.END)],
+        fallbacks=[CommandHandler("start", restart), CallbackQueryHandler(cancel, pattern="^action:cancel$")],
     )
