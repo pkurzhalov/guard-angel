@@ -1,3 +1,4 @@
+# This is the complete, final, and unabridged version of sheets.py
 import os
 import shutil
 from datetime import datetime, timedelta
@@ -12,11 +13,12 @@ from ..config import settings
 
 SHEET_ID = settings.spreadsheet_id
 
-# (All helper functions are correct and included)
+# --- CORE HELPER FUNCTIONS ---
 def get_current_cell(driver_name: str, column: str = "A") -> int:
     range_name = f"{driver_name}!{column}:{column}"
     result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_name).execute()
     return len(result.get("values", []))
+
 def get_id_from_link(link):
     if not link: return None
     start = "/d/"
@@ -24,12 +26,15 @@ def get_id_from_link(link):
         if "/view" in link: return link[link.index(start)+3:link.index("/view")]
         return link[link.index(start)+3:]
     except (ValueError, TypeError): return None
+
 def open_invoice_load(driver, cell):
     range_name = f'{driver}!A{cell}:AA{cell}'
     return sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_name).execute().get('values')
+
 def update_cell(driver, cell, letter, value):
     rangeName = f"{driver}!{letter}{cell}"; body = {'values': [[value]]}
     sh.spreadsheets().values().update(spreadsheetId=SHEET_ID, range=rangeName, valueInputOption='USER_ENTERED', body=body).execute()
+
 def download_file(file_id, name):
     if not file_id: raise ValueError("File ID missing")
     attempts, max_attempts, wait_time = 0, 4, 5
@@ -48,6 +53,7 @@ def download_file(file_id, name):
             if error.resp.status == 404 and attempts < max_attempts - 1:
                 attempts += 1; time.sleep(wait_time)
             else: raise error
+
 def _perform_upload(local_path: str):
     attempts, max_attempts, wait_time = 0, 3, 5
     while attempts < max_attempts:
@@ -62,13 +68,15 @@ def _perform_upload(local_path: str):
             if attempts >= max_attempts: raise e
             time.sleep(wait_time)
         except Exception as e: raise e
+
 def upload_pod(local_path: str, driver: str, cell: int):
     file = _perform_upload(local_path)
     update_cell(driver, cell, 'N', file.get('webViewLink'))
-def upload_file(file_name, driver_name, cell):
+
+def upload_file(file_name, driver_name, cell, column: str):
     file = _perform_upload(file_name)
-    column = 'R' if 'Invoice' in file_name else 'X'
     update_cell(driver_name, cell, column, file.get('webViewLink'))
+
 def open_prev_insurance(driver, cell):
     range_name = f'{driver}!Y1:Y{cell}'
     result = sh.spreadsheets().values().get(spreadsheetId=SHEET_ID, range=range_name).execute()
@@ -76,6 +84,8 @@ def open_prev_insurance(driver, cell):
         for row in reversed(result.get('values')):
             if row and row[0]: return row
     raise RuntimeError(f"Could not find previous insurance date for {driver}")
+
+# --- INVOICE PDF FUNCTION ---
 def compilate_invoice_page(loadnum, driver, cell, broker, pu, pudate, deliv, deldate, innum, gross, lumper_kolobok, lumper_broker):
     pdf = FPDF('P', 'mm', 'A4'); pdf.add_page()
     header_text = ('Kolobok Inc.\n9063 Caloosa Rd\nFort Myers, FL 33967\n239-293-1919 or 312-535-3912\nchrisribas89@gmail.com')
@@ -107,6 +117,8 @@ def compilate_invoice_page(loadnum, driver, cell, broker, pu, pudate, deliv, del
     pdf.set_font('helvetica', 'B', 10); pdf.set_text_color(0, 0, 0); pdf.cell(0, 8, '9063 Caloosa Rd', ln=1, align='C'); pdf.cell(0, 8, 'Fort Myers, FL 33967', ln=1, align='C')
     pdf.set_font('helvetica', '', 8); pdf.cell(0, 10, 'Thank you!', ln=1, align='C')
     os.makedirs("./files_cash", exist_ok=True); pdf.output(f'./files_cash/Invoice_{loadnum}_MC_1294648.pdf')
+
+# --- SALARY PDF FUNCTIONS ---
 def compilate_salary_company_driver(driver, start_row, start_date_ignored, end_date_ignored):
     pdf = FPDF('P', 'mm', 'A4'); pdf.add_page()
     read_range = f"{driver}!A{start_row}:AA"
@@ -205,9 +217,9 @@ def compilate_salary_page(driver, cell, fuel_start_date, fuel_end_date, totals, 
         pdf.set_font('helvetica', '', 12); pdf.cell(177, 8, f'{label}: ${abs(value):,.2f}', ln=1)
         line_width = min((abs(value) / total_base) * 177 if total_base > 0 else 0, 177)
         if color_override == 'yellow':
-            pdf.set_fill_color(252, 239, 37)
+            pdf.set_fill_color(252, 239, 37) # Yellow
         else:
-            pdf.set_fill_color(252, 66, 37) if value >= 0 else pdf.set_fill_color(85, 252, 37)
+            pdf.set_fill_color(252, 66, 37) if value >= 0 else pdf.set_fill_color(85, 252, 37) # Red / Green
         pdf.cell(line_width, 0.5, '', ln=1, fill=True)
     
     total_fuel = totals + discount

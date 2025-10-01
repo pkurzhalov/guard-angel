@@ -30,13 +30,9 @@ class Settings(BaseSettings):
     smtp_password: str = Field(..., alias="SMTP_PASSWORD")
     signature_img_path: str = Field(..., alias="SIGNATURE_IMG_PATH")
     
-    signature_coords_x: int = Field(50, alias="SIGNATURE_COORDS_X")
-    signature_coords_y: int = Field(80, alias="SIGNATURE_COORDS_Y")
-    signature_scale: float = Field(0.3, alias="SIGNATURE_SCALE")
-    date_coords_x: int = Field(200, alias="DATE_COORDS_X")
-    date_coords_y: int = Field(95, alias="DATE_COORDS_Y")
-    custom_text_coords_x: int = Field(300, alias="CUSTOM_TEXT_COORDS_X")
-    custom_text_coords_y: int = Field(95, alias="CUSTOM_TEXT_COORDS_Y")
+    # New Selenium paths
+    geckodriver_path: str = Field(..., alias="GECKODRIVER_PATH")
+    firefox_profile_path: str = Field(..., alias="FIREFOX_PROFILE_PATH")
 
     owner_operators: List[str] = []; company_drivers: List[str] = []
     insurance_rates: Dict[str, int] = {}; trailer_rates: Dict[str, int] = {}
