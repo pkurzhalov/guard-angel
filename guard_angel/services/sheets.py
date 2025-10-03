@@ -85,7 +85,44 @@ def open_prev_insurance(driver, cell):
             if row and row[0]: return row
     raise RuntimeError(f"Could not find previous insurance date for {driver}")
 
-# --- INVOICE PDF FUNCTION ---
+def get_start_finish_for_ifta(quarter: int, driver: str) -> list:
+    now = datetime.now(); year = now.strftime("%Y")
+    if quarter == 1: start_date = f'12/31/{int(year)-1}'; end_date = f'04/1/{year}'
+    elif quarter == 2: start_date = f'03/31/{year}'; end_date = f'07/1/{year}'
+    elif quarter == 3: start_date = f'06/30/{year}'; end_date = f'10/1/{year}'
+    elif quarter == 4: start_date = f'09/30/{year}'; end_date = f'01/1/{int(year)+1}'
+    else: return []
+
+    start_date = datetime.strptime(start_date, "%m/%d/%Y")
+    end_date = datetime.strptime(end_date, "%m/%d/%Y")
+    
+    last_row = get_current_cell(driver)
+    ranges = [f"{driver}!C2:C{last_row}", f"{driver}!E2:E{last_row}", f"{driver}!F2:F{last_row}"]
+    result = sh.spreadsheets().values().batchGet(spreadsheetId=SHEET_ID, ranges=ranges).execute()
+    
+    dates = result['valueRanges'][0].get('values', [])
+    pus = result['valueRanges'][1].get('values', [])
+    dels = result['valueRanges'][2].get('values', [])
+
+    trip_segments = []
+    for i in range(len(dates)):
+        try:
+            date_str = dates[i][0]; pu_str = pus[i][0]; del_str = dels[i][0]
+            date_obj = datetime.strptime(date_str, "%m/%d/%Y")
+            if start_date < date_obj < end_date:
+                pu_list = [p.strip() for p in pu_str.split(';')]
+                del_list = [d.strip() for d in del_str.split(';')]
+                for j in range(len(pu_list) - 1): trip_segments.append((pu_list[j], pu_list[j+1]))
+                trip_segments.append((pu_list[-1], del_list[0]))
+                for j in range(len(del_list) - 1): trip_segments.append((del_list[j], del_list[j+1]))
+                if (i + 1) < len(pus) and pus[i+1]:
+                    next_pu = pus[i+1][0].split(';')[0].strip()
+                    trip_segments.append((del_list[-1], next_pu))
+        except (ValueError, IndexError):
+            continue
+    return trip_segments
+
+# --- PDF GENERATION FUNCTIONS ---
 def compilate_invoice_page(loadnum, driver, cell, broker, pu, pudate, deliv, deldate, innum, gross, lumper_kolobok, lumper_broker):
     pdf = FPDF('P', 'mm', 'A4'); pdf.add_page()
     header_text = ('Kolobok Inc.\n9063 Caloosa Rd\nFort Myers, FL 33967\n239-293-1919 or 312-535-3912\nchrisribas89@gmail.com')
@@ -118,7 +155,6 @@ def compilate_invoice_page(loadnum, driver, cell, broker, pu, pudate, deliv, del
     pdf.set_font('helvetica', '', 8); pdf.cell(0, 10, 'Thank you!', ln=1, align='C')
     os.makedirs("./files_cash", exist_ok=True); pdf.output(f'./files_cash/Invoice_{loadnum}_MC_1294648.pdf')
 
-# --- SALARY PDF FUNCTIONS ---
 def compilate_salary_company_driver(driver, start_row, start_date_ignored, end_date_ignored):
     pdf = FPDF('P', 'mm', 'A4'); pdf.add_page()
     read_range = f"{driver}!A{start_row}:AA"

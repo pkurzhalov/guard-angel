@@ -32,6 +32,7 @@ class Settings(BaseSettings):
     signature_img_path: str = Field(..., alias="SIGNATURE_IMG_PATH")
     geckodriver_path: str = Field(..., alias="GECKODRIVER_PATH")
     firefox_profile_path: str = Field(..., alias="FIREFOX_PROFILE_PATH")
+    states_geojson_path: str = Field(..., alias="STATES_GEOJSON_PATH")
 
     @property
     def owner_operators(self) -> List[str]:
@@ -49,7 +50,6 @@ class Settings(BaseSettings):
     def invoice_address_block(self) -> str:
         address = self.company_address.replace('\\n', '\n')
         return f"{self.company_name}\n{address}\n{self.company_phone}\n{self.company_email}"
-
     def get_insurance_pay(self, driver: str) -> int:
         rate = os.getenv(f"INSURANCE_WEEKLY_{driver.upper()}")
         return int(rate) if rate and rate.isdigit() else 0

@@ -7,7 +7,7 @@ from datetime import datetime
 from pdf2image import convert_from_bytes
 from . import sheets
 from ..config import settings
-from .mileage_calculator import mileage_browser
+from .rc_mileage_calculator import mileage_browser as rc_mileage_browser
 
 _sheet_id_cache = {}
 
@@ -43,7 +43,12 @@ def write_load_to_sheet(driver: str, data: dict, signed_rc_path: str) -> str | N
     acc_email = lookup_accounting_email(data.get("Broker Name"))
     if acc_email: sheets.update_cell(driver, next_row, 'T', acc_email)
     last_location = get_last_load_location(driver)
-    total_miles = mileage_browser.get_miles(last_location, data.get("PU Location", ""), data.get("Delivery Location", ""))
+    # CHANGE TO THIS:
+    total_miles = rc_mileage_browser.get_miles(
+        last_location,
+        data.get("PU Location", ""),
+        data.get("Delivery Location", "")
+    )
     if total_miles is None: total_miles = 0; rpm = 0
     else: rate_str = str(data.get("Rate", "0")).replace(",", "").replace("$", ""); rpm = (float(rate_str) / total_miles) if total_miles > 0 else 0
     sheets.update_cell(driver, next_row, 'K', str(total_miles)); sheets.update_cell(driver, next_row, 'L', f"{rpm:.2f}")
@@ -76,16 +81,16 @@ def view_current_load(driver: str) -> tuple[str, str | None, list]:
     last_row = sheets.get_current_cell(driver, column="A")
     row_data = sheets.sh.spreadsheets().values().get(spreadsheetId=settings.spreadsheet_id, range=f"{driver}!A{last_row}:R{last_row}").execute().get('values', [[]])[0]
     if not row_data: raise ValueError(f"No current load data found for {driver}.")
-    
+
     def get_col(idx, default=''): return row_data[idx] if len(row_data) > idx and row_data[idx] else default
-    
+
     pu_time = get_col(1); del_time = get_col(3)
     pu_loc = get_col(4); del_loc = get_col(5)
     gross = get_col(9); miles = get_col(10); rpm = get_col(11)
     dispatch_notes = get_col(12); rc_link = get_col(8)
-    
+
     summary = (f"🚚{pu_loc}➡️{del_loc}\nDispatch notes: {dispatch_notes}\n\nPU in 🚚{pu_loc}: {pu_time}\nDEL in ➡️{del_loc}: {del_time}\n\nTotal Miles(DH included): {miles}\nGross: {gross}💵\nRPM: ${rpm} per mile")
-    
+
     image_paths = []
     if rc_link:
         rc_id = sheets.get_id_from_link(rc_link)
@@ -96,5 +101,5 @@ def view_current_load(driver: str) -> tuple[str, str | None, list]:
             path = f"./files_cash/RC_PAGE_{i+1}.png"
             image.save(path, "PNG")
             image_paths.append(path)
-            
+
     return summary, rc_link, image_paths

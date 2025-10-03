@@ -1,62 +1,62 @@
 import re
 import time
+import traceback
 from selenium import webdriver
 from selenium.webdriver.common.by import By
 from selenium.webdriver.common.keys import Keys
-from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.firefox.options import Options
+from selenium.webdriver.firefox.service import Service
 from selenium.webdriver.support.wait import WebDriverWait
 from selenium.webdriver.support import expected_conditions as EC
 from ..config import settings
 
-# Using your original, reliable 3-field URL
-URL = "https://www.google.com/maps/dir/Fort+Myers,+FL/Atlanta,+GA/Baltimore,+MD"
+# **FIX**: Using the exact, trusted URL from your gm_total_miles.py
+URL = "https://www.google.es/maps/dir/Fort+Myers,+Florida,+EE.+UU./Atlanta,+Georgia,+EE.+UU./@30.1718187,-86.0865988,7z/data=!3m1!4b1!4m14!4m13!1m5!1m1!1s0x88db420189a85429:0xc62908530aba258a!2m2!1d-81.8605575!2d26.6409247!1m5!1m1!1s0x88f5045d6993098d:0x66fede2f990b630b!2m2!1d-84.3885209!2d33.7501275!3e0?hl=en&entry=ttu&g_ep=EgoyMDI1MDcwNi4wIKXMDSoASAFQAw%3D%3D"
 
 class MileageBrowser:
     def __init__(self):
-        self.browser = self._init_browser()
-
-    def _init_browser(self):
         options = Options()
         options.headless = True
         options.profile = settings.firefox_profile_path
         service = Service(settings.geckodriver_path)
-        browser_instance = webdriver.Firefox(service=service, options=options)
-        browser_instance.get(URL) # Go to the pre-filled URL
-        return browser_instance
+        self.browser = webdriver.Firefox(service=service, options=options)
+        self.browser.get(URL)
+        print("🌐 Mileage calculator browser started.")
 
-    def get_miles(self, *waypoints: str) -> int | None:
+    def get_miles(self, origin: str, destination: str) -> float | None:
+        """Gets total miles using your trusted Selenium logic."""
         try:
-            input_fields = self.browser.find_elements(By.CSS_SELECTOR, "div[id^='directions-searchbox-'] input")
-            
-            # Input new waypoints
-            for i, point in enumerate(waypoints):
-                if i < len(input_fields):
-                    input_field = input_fields[i]
-                    input_field.clear()
-                    input_field.send_keys(point)
-                    if i == len(waypoints) - 1:
-                        input_field.send_keys(Keys.ENTER)
+            print(f"📦 Fetching miles: {origin} → {destination}")
+            # Use the exact CSS selector from your old script
+            WebDriverWait(self.browser, 10).until(EC.presence_of_all_elements_located((By.CSS_SELECTOR, "input.tactile-searchbox-input")))
+            inputs = self.browser.find_elements(By.CSS_SELECTOR, "input.tactile-searchbox-input")
+            if len(inputs) < 2: return None
 
-            trip_element = WebDriverWait(self.browser, 20).until(
+            inputs[0].send_keys(Keys.CONTROL, 'a', Keys.BACKSPACE); time.sleep(0.5)
+            inputs[0].send_keys(origin); time.sleep(0.5); inputs[0].send_keys(Keys.ENTER)
+
+            inputs[1].send_keys(Keys.CONTROL, 'a', Keys.BACKSPACE); time.sleep(0.5)
+            inputs[1].send_keys(destination); time.sleep(0.5); inputs[1].send_keys(Keys.ENTER)
+
+            section = WebDriverWait(self.browser, 15).until(
                 EC.visibility_of_element_located((By.ID, "section-directions-trip-0"))
             )
-            time.sleep(2)
+            time.sleep(1.5) # Wait for text to fully update
             
-            distance_div_xpath = ".//div[contains(text(), 'mi') and not(contains(text(), 'min'))]"
-            distance_div = trip_element.find_element(By.XPATH, distance_div_xpath)
-            miles_text = distance_div.text
-            
-            miles_match = re.search(r'([\d,]+)\s*mi', miles_text)
-            if miles_match:
-                total_miles = int(miles_match.group(1).replace(",", ""))
-                print(f"Google Maps calculated miles: {total_miles}")
-                return total_miles
-
+            text = section.text
+            # Use the exact, robust regex from your old script
+            match = re.search(r'(\d{1,3}(?:,\d{3})*|\d+(?:\.\d+)?)\s*miles', text, re.IGNORECASE)
+            if match:
+                miles = float(match.group(1).replace(",", ""))
+                print(f"✅ Google Maps Total Miles: {miles}")
+                return round(miles, 2)
+            else:
+                print("❌ Could not find miles in panel.")
+                return 0
         except Exception as e:
-            print(f"Error in Selenium mileage calculation: {e}")
+            print(f"🚨 Error in Selenium mileage calculation: {e}")
             self.browser.save_screenshot('selenium_error.png')
-        return None
+        return 0
 
     def close(self):
         self.browser.quit()
