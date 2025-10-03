@@ -1,7 +1,7 @@
-# This is the complete, final, and unabridged version of sheets.py
+from __future__ import print_function
 import os
 import shutil
-from datetime import datetime, timedelta
+from datetime import datetime
 import io
 import time
 import ssl
@@ -132,7 +132,7 @@ def compilate_salary_company_driver(driver, start_row, start_date_ignored, end_d
     if not end_date: end_date = start_date
     pdf.set_font('helvetica', 'B', 18)
     pdf.cell(190, 10, 'Kolobok INC', ln=1)
-    pdf.cell(190, 10, f'Pay to: {settings.pay_to_map.get(driver, "Driver")}', ln=1)
+    pdf.cell(190, 10, f'Pay to: {settings.get_pay_to_name(driver)}', ln=1)
     pdf.cell(190, 10, f'Statement {start_date} - {end_date}', ln=1)
     pdf.set_font('helvetica', 'B', 14); pdf.cell(15, 15, 'Loads Complete:', ln=1)
     pdf.set_font('helvetica', 'B', 8)
@@ -189,7 +189,7 @@ def compilate_salary_page(driver, cell, fuel_start_date, fuel_end_date, totals, 
     
     pdf.set_font('helvetica', 'B', 18)
     pdf.cell(190, 10, 'Kolobok INC', ln=1)
-    pdf.cell(190, 10, f'Pay to: {settings.pay_to_map.get(driver, "Driver")}', ln=1)
+    pdf.cell(190, 10, f'Pay to: {settings.get_pay_to_name(driver)}', ln=1)
     pdf.cell(190, 10, f'Statement {start_date} - {end_date}', ln=1)
     pdf.set_font('helvetica', 'B', 14); pdf.cell(15, 15, 'Loads Complete:', ln=1)
     pdf.set_font('helvetica', 'B', 8)
@@ -216,10 +216,8 @@ def compilate_salary_page(driver, cell, fuel_start_date, fuel_end_date, totals, 
     def draw_deduction(label, value, total_base, color_override=None):
         pdf.set_font('helvetica', '', 12); pdf.cell(177, 8, f'{label}: ${abs(value):,.2f}', ln=1)
         line_width = min((abs(value) / total_base) * 177 if total_base > 0 else 0, 177)
-        if color_override == 'yellow':
-            pdf.set_fill_color(252, 239, 37) # Yellow
-        else:
-            pdf.set_fill_color(252, 66, 37) if value >= 0 else pdf.set_fill_color(85, 252, 37) # Red / Green
+        if color_override == 'yellow': pdf.set_fill_color(252, 239, 37)
+        else: pdf.set_fill_color(252, 66, 37) if value >= 0 else pdf.set_fill_color(85, 252, 37)
         pdf.cell(line_width, 0.5, '', ln=1, fill=True)
     
     total_fuel = totals + discount

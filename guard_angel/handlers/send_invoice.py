@@ -75,17 +75,14 @@ async def handle_pod_decision(update: Update, context: ContextTypes.DEFAULT_TYPE
         return await generate_invoice(update, context)
 
 async def handle_pod_files(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Handles receiving PDFs and Photos, storing them in memory."""
     file_id = update.message.document.file_id if update.message.document else update.message.photo[-1].file_id
     file = await context.bot.get_file(file_id)
-    # **FIX**: Store as BytesIO stream, just like the old script
     file_stream = io.BytesIO(await file.download_as_bytearray())
     context.user_data["pod_files"].append(file_stream)
     await update.message.reply_text(f"File #{len(context.user_data['pod_files'])} received. Send more or click 'Done'.")
     return STATE_WAIT_POD_UPLOAD
 
 async def merge_and_upload_pod(update: Update, context: ContextTypes.DEFAULT_TYPE):
-    """Merges all collected files into a single PDF and proceeds."""
     q = update.callback_query; await q.answer()
     pod_files = context.user_data.get("pod_files", [])
     if not pod_files:
@@ -95,18 +92,16 @@ async def merge_and_upload_pod(update: Update, context: ContextTypes.DEFAULT_TYP
     await q.edit_message_text(f"Merging {len(pod_files)} file(s) into one POD...")
     
     merger = PdfMerger()
-    # **FIX**: Ensure the output directory exists BEFORE trying to write to it.
     os.makedirs("./files_cash", exist_ok=True)
     
     for file_stream in pod_files:
-        file_stream.seek(0) # IMPORTANT: Rewind the in-memory file
-        if file_stream.read(4) == b'%PDF': # Check if it's a PDF
+        file_stream.seek(0)
+        if file_stream.read(4) == b'%PDF':
             file_stream.seek(0)
             merger.append(file_stream)
-        else: # Assume it's an image
+        else:
             file_stream.seek(0)
             try:
-                # **FIX**: Convert image stream to PDF bytes
                 pdf_bytes = img2pdf.convert(file_stream.read())
                 merger.append(io.BytesIO(pdf_bytes))
             except Exception as e:
@@ -123,7 +118,6 @@ async def merge_and_upload_pod(update: Update, context: ContextTypes.DEFAULT_TYP
     
     return await generate_invoice(update, context)
 
-# The generate_invoice and email functions remain unchanged
 async def generate_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
     driver = context.user_data["driver"]; row = context.user_data["row"]
     try:
@@ -137,7 +131,10 @@ async def generate_invoice(update: Update, context: ContextTypes.DEFAULT_TYPE):
         final_filename = f"Invoice_{load_num}_MC_1294648.pdf"
         merger.append(f"./files_cash/Invoice_{load_num}_MC_1294648.pdf"); merger.append("./files_cash/RC.pdf"); merger.append("./files_cash/POD.pdf")
         merger.write(final_filename); merger.close()
-        sheets.upload_file(final_filename, driver, row)
+        
+        # **THE FIX IS HERE**: Added column='R'
+        sheets.upload_file(final_filename, driver, row, column='R')
+        
         context.user_data.update({"final_invoice_path": final_filename, "broker_email": broker_email, "cc_list": cc_emails, "load_num": load_num})
         kb = [[InlineKeyboardButton("✅ Yes, Send Email", callback_data="email:yes"), InlineKeyboardButton("❌ No", callback_data="email:no")]]
         reply_method = update.message.reply_document if hasattr(update, 'message') and update.message else update.callback_query.message.reply_document

@@ -116,7 +116,8 @@ async def process_company_driver_salary(update: Update, context: ContextTypes.DE
         sheets.compilate_salary_company_driver(driver, cell, "", "")
         os.rename("./files_cash/1st_page.pdf", final_pdf_name)
         await update.message.reply_text("Uploading to Google Drive...")
-        sheets.upload_file(final_pdf_name, driver, cell)
+        # **FIX**: Added column='X' for statements
+        sheets.upload_file(final_pdf_name, driver, cell, column='X')
         sheets.update_cell(driver, cell, 'Y', 'no insurance')
         with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
         await update.message.reply_text("✅ Statement created!")
@@ -133,7 +134,7 @@ async def process_owner_operator_salary(update: Update, context: ContextTypes.DE
             fuel_start_date=ud.get("start_date"), fuel_end_date=ud.get("end_date"),
             totals=ud.get("totals", 0), discount=ud.get("discount", 0),
             insurance=ud.get("insurance_payment", 0), insurance_d=ud.get("insurance_period_str", ""),
-            trailer=ud.get("trailer_payment", 0), trailer_d=f"Trailer Payment for {driver}"
+            trailer=ud.get("trailer_payment", 0), trailer_d="Trailer Payment"
         )
         first_page_path = "./files_cash/1st_page.pdf"
         final_pdf_name = f"Statement_{driver}_{datetime.now().strftime('%m-%d-%Y')}.pdf"
@@ -145,7 +146,8 @@ async def process_owner_operator_salary(update: Update, context: ContextTypes.DE
         merger.close()
         
         await update.message.reply_text("Uploading to Google Drive...")
-        sheets.upload_file(final_pdf_name, driver, cell)
+        # **FIX**: Added column='X' for statements
+        sheets.upload_file(final_pdf_name, driver, cell, column='X')
         sheets.update_cell(driver, cell, 'Y', ud["insurance_period_str"])
         
         with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
