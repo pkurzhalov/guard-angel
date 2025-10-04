@@ -6,7 +6,7 @@ import subprocess
 from datetime import datetime
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import (
-    CommandHandler, ConversationHandler, MessageHandler, CallbackQueryHandler, 
+    CommandHandler, ConversationHandler, MessageHandler, CallbackQueryHandler,
     ContextTypes, filters
 )
 from ..config import settings
@@ -152,9 +152,27 @@ async def handle_broker_info(update: Update, context: ContextTypes.DEFAULT_TYPE)
     if os.path.exists(RC_TO_SIGN_PATH): os.remove(RC_TO_SIGN_PATH)
     if os.path.exists(SIGNED_RC_PATH): os.remove(SIGNED_RC_PATH)
     return ConversationHandler.END
+
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    await update.effective_message.reply_text("Operation cancelled.")
+    # This is the consistent message you want
+    text = "Operation cancelled. Send /start to see the main menu."
+
+    query = update.callback_query
+
+    if query:
+        # If it was a button press, edit the original message
+        await query.answer()
+        await query.edit_message_text(text)
+    else:
+        # If it was a /cancel command, reply with a new message
+        await update.message.reply_text(text)
+
+    # It's also good practice to clean up any temporary files
+    if os.path.exists(RC_TO_SIGN_PATH): os.remove(RC_TO_SIGN_PATH)
+    if os.path.exists(SIGNED_RC_PATH): os.remove(SIGNED_RC_PATH)
+
     return ConversationHandler.END
+    
 def handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(start, pattern="^act:sign_RC$")],
@@ -169,5 +187,8 @@ def handler() -> ConversationHandler:
             AWAIT_ACCOUNTING_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_accounting_email)],
             AWAIT_BROKER_INFO: [MessageHandler(filters.TEXT & ~filters.COMMAND, handle_broker_info)],
         },
-        fallbacks=[CommandHandler("cancel", cancel)],
+        fallbacks=[
+            CommandHandler("cancel", cancel),
+            CallbackQueryHandler(cancel, pattern="^rc:cancel$") # Add this line
+        ],
     )

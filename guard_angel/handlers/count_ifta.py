@@ -66,6 +66,7 @@ async def handle_fuel_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     await update.message.reply_text("Processing fuel statement...")
     file = await update.message.document.get_file()
     pdf_path = f"./files_cash/ifta_fuel_{update.effective_user.id}.pdf"
+    context.user_data['temp_file'] = pdf_path # Add this line
     await file.download_to_drive(pdf_path)
 
     result_text = ifta_service.parse_fuel_statement(pdf_path)
@@ -74,8 +75,20 @@ async def handle_fuel_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     return ConversationHandler.END
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    q = update.callback_query; await q.answer()
-    await q.edit_message_text("IFTA operation cancelled.")
+    text = "Operation cancelled. Send /start to see the main menu."
+
+    # Clean up the specific temp file created by the IFTA fuel workflow
+    temp_file = context.user_data.get('temp_file')
+    if temp_file and os.path.exists(temp_file):
+        os.remove(temp_file)
+
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(text)
+    else:
+        await update.message.reply_text(text)
+
     return ConversationHandler.END
 
 def handler() -> ConversationHandler:
