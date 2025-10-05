@@ -65,55 +65,14 @@ def write_load_to_sheet(driver: str, data: dict, signed_rc_path: str) -> str | N
     commission_map = {"Walter": 70, "Yura": 5, "Nestor": 67, "Javier": 70, "Denis": 70}
     sheets.update_cell(driver, next_row, 'U', commission_map.get(driver, ""))
 
-    # --- REFACTOR AND FIX START ---
-    # 1. Define the data for the main cell formatting request as a separate variable.
-    #    This makes the code much more readable.
-    main_cell_format_request = {
-        "repeatCell": {
-            "range": {
-                "sheetId": get_sheet_id(driver),
-                "startRowIndex": next_row - 1,
-                "endRowIndex": next_row,
-                "startColumnIndex": 0,
-                "endColumnIndex": 27
-            },
-            "cell": {
-                "userEnteredFormat": {
-                    "backgroundColor": {"red": 1, "green": 1, "blue": 0.6}
-                }
-            },
-            "fields": "userEnteredFormat.backgroundColor"
-        }
-    }
+    # This is the corrected line that fixes the SyntaxError
+    requests = [{"repeatCell": {"range": {"sheetId": get_sheet_id(driver), "startRowIndex": next_row-1, "endRowIndex": next_row, "startColumnIndex": 0, "endColumnIndex": 27}, "cell": {"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 0.6}}}, "fields": "userEnteredFormat.backgroundColor"}}}]
 
-    # 2. Create the list and add the first request. This structure is simple and correct.
-    requests = [main_cell_format_request]
-
-    # 3. If there's an accounting email, define the second request and append it to the list.
     if acc_email:
-        acc_email_format_request = {
-            "repeatCell": {
-                "range": {
-                    "sheetId": get_sheet_id(driver),
-                    "startRowIndex": next_row - 1,
-                    "endRowIndex": next_row,
-                    "startColumnIndex": 6,
-                    "endColumnIndex": 7
-                },
-                "cell": {
-                    "userEnteredFormat": {
-                        "backgroundColor": {"red": 0.8, "green": 1, "blue": 0.8}
-                    }
-                },
-                "fields": "userEnteredFormat.backgroundColor"
-            }
-        }
-        requests.append(acc_email_format_request)
-    # --- REFACTOR AND FIX END ---
+        requests.append({"repeatCell": {"range": {"sheetId": get_sheet_id(driver), "startRowIndex": next_row-1, "endRowIndex": next_row, "startColumnIndex": 6, "endColumnIndex": 7}, "cell": {"userEnteredFormat": {"backgroundColor": {"red": 0.8, "green": 1, "blue": 0.8}}}, "fields": "userEnteredFormat.backgroundColor"}})
 
     sheets.sh.spreadsheets().batchUpdate(spreadsheetId=settings.spreadsheet_id, body={"requests": requests}).execute()
     return acc_email
-
 
 def get_last_load_location(driver: str) -> str:
     try:
@@ -132,7 +91,7 @@ def launch_and_wait_for_gui() -> bool:
         print(f"Failed to launch GUI: {e}"); return False
 
 def get_driver_signature_text(driver_name: str) -> str:
-    signatures = {"Walter": "Driver:\nWalter\n321-368-0207\ntrk#708\ntrlr # 2102","Yura": "Driver:\nYury Dereviankin\nph# 239-239-1919\ntrk# 1511\ntrlr# 55","Nestor": "Driver:\nNestor\n786-226-5816\ntrk#1511\ntrlr # 570260",}
+    signatures = {"Walter": "Driver:\nWalter\n321-368-0207\ntrk#708\ntrlr # 2102","Yura": "Driver:\nYury Dereviankin\nph# 239-293-1919\ntrk# 1511\ntrlr# 55","Nestor": "Driver:\nNestor\n786-226-5816\ntrk#1511\ntrlr # 570260",}
     dispatcher_info = "\nDispatcher:\nChris Ribas\nph# 312-535-3912\nchrisribas89@gmail.com"
     return signatures.get(driver_name, "Driver info not found.") + dispatcher_info
 

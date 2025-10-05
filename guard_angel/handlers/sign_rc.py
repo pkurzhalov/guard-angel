@@ -90,10 +90,14 @@ async def handle_sign_decision(update: Update, context: ContextTypes.DEFAULT_TYP
 async def collect_data(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     idx = context.user_data['field_index']; field_name = FIELDS[idx]
     user_input = update.message.text.strip()
-    if field_name in ["PU Date", "Delivery Date"] and not re.match(r'^\d{1,2}/\d{1,2}/\d{4}$', user_input):
-        await update.message.reply_text("❌ Invalid date. Use `MM/DD/YYYY`.", parse_mode="Markdown"); return COLLECT_DATA
-    if field_name in ["PU Location", "Delivery Location"] and not re.match(r"^[A-Za-z\s\.]+,[\s]*[A-Z]{2}$", user_input):
-        await update.message.reply_text("❌ Invalid location. Use `City, ST`.", parse_mode="Markdown"); return COLLECT_DATA
+    if field_name in ["PU Location", "Delivery Location"]:
+        # This new regex allows one or more "City, ST" pairs separated by semicolons
+        location_pattern = re.compile(r"^[A-Za-z\s\.]+,[\s]*[A-Z]{2}(?:;[\s]*[A-Za-z\s\.]+,[\s]*[A-Z]{2})*$")
+        if not location_pattern.match(user_input):
+            await update.message.reply_text("❌ Invalid location format. Use `City, ST` or `City, ST; City, ST`.", parse_mode="Markdown")
+            return COLLECT_DATA
+    # if field_name in ["PU Location", "Delivery Location"] and not re.match(r"^[A-Za-z\s\.]+,[\s]*[A-Z]{2}$", user_input):
+    #     await update.message.reply_text("❌ Invalid location. Use `City, ST`.", parse_mode="Markdown"); return COLLECT_DATA
     if field_name == "Broker Emails":
         if not re.match(r"^[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}$", user_input):
             await update.message.reply_text("❌ Invalid email format. Please try again."); return COLLECT_DATA
@@ -172,14 +176,20 @@ async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     if os.path.exists(SIGNED_RC_PATH): os.remove(SIGNED_RC_PATH)
 
     return ConversationHandler.END
-    
+
 def handler() -> ConversationHandler:
     return ConversationHandler(
         entry_points=[CallbackQueryHandler(start, pattern="^act:sign_RC$")],
         states={
             STATE_CHOOSE_ACTION: [CallbackQueryHandler(choose_action, pattern="^rc:(add_new|view_current)$")],
-            CHOOSE_DRIVER_VIEW: [CallbackQueryHandler(view_rc_for_driver, pattern="^driver:.+")],
-            CHOOSE_DRIVER_ADD: [CallbackQueryHandler(choose_driver_for_add, pattern="^driver:.+")],
+            CHOOSE_DRIVER_VIEW: [
+                CallbackQueryHandler(view_rc_for_driver, pattern="^driver:.+"),
+                CallbackQueryHandler(start, pattern="^rc:back$") # Add this line
+            ],
+            CHOOSE_DRIVER_ADD: [
+                CallbackQueryHandler(choose_driver_for_add, pattern="^driver:.+"),
+                CallbackQueryHandler(start, pattern="^rc:back$") # Add this line
+            ],
             WAIT_RC_PDF: [MessageHandler(filters.Document.PDF, handle_pdf)],
             ASK_SIGN: [CallbackQueryHandler(handle_sign_decision, pattern="^sign:(yes|no)$")],
             COLLECT_DATA: [MessageHandler(filters.TEXT & ~filters.COMMAND, collect_data)],
