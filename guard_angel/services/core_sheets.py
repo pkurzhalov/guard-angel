@@ -25,7 +25,7 @@ def get_id_from_link(link):
 
 def update_cell(driver, cell, letter, value):
     rangeName = f"{driver}!{letter}{cell}"; body = {'values': [[value]]}
-    sh.spreadsheets().values().update(spreadsheetId=SHEET_ID, range=rangeName, valueInputOption='USER_ENTERED', body=body).execute()
+    sh.spreadsheets().values().update(spreadsheetId=SHEET_ID, range=rangeName, valueInputOption='RAW', body=body).execute()
 
 def download_file(file_id, name):
     if not file_id: raise ValueError("File ID missing")
