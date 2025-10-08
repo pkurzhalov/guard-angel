@@ -52,3 +52,112 @@ def upload_pod(local_path: str, driver: str, cell: int):
 def upload_file(file_name, driver_name, cell, column: str):
     file = _perform_upload(file_name)
     update_cell(driver_name, cell, column, file.get('webViewLink'))
+
+def clear_row_background(driver_name: str, row: int):
+    """Resets the background color for specified ranges in a given row."""
+    try:
+        # First, we need to get the sheetId for the given driver name
+        spreadsheet_metadata = sh.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+        sheets = spreadsheet_metadata.get('sheets', [])
+        sheet_id = None
+        for s in sheets:
+            if s.get('properties', {}).get('title', '') == driver_name:
+                sheet_id = s.get('properties', {}).get('sheetId')
+                break
+
+        if sheet_id is None:
+            print(f"Could not find sheetId for driver: {driver_name}")
+            return
+
+        # Define the ranges to be cleared (row index is 0-based, so subtract 1)
+        row_index = row - 1
+        requests = [
+            {
+                "updateCells": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row, "startColumnIndex": 0, "endColumnIndex": 6}, # A:F
+                    "rows": [{"values": [{"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}] * 6}],
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            },
+            {
+                "updateCells": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row, "startColumnIndex": 7, "endColumnIndex": 17}, # H:Q
+                    "rows": [{"values": [{"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}] * 10}],
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            },
+            # --- THIS IS THE NEW BLOCK FOR S and T ---
+            {
+                "updateCells": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row, "startColumnIndex": 18, "endColumnIndex": 20}, # S:T
+                    "rows": [{"values": [{"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}] * 2}],
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            },
+            # --- END OF NEW BLOCK ---
+            {
+                "updateCells": {
+                    "range": {"sheetId": sheet_id, "startRowIndex": row_index, "endRowIndex": row, "startColumnIndex": 21, "endColumnIndex": 27}, # V:AA
+                    "rows": [{"values": [{"userEnteredFormat": {"backgroundColor": {"red": 1, "green": 1, "blue": 1}}}] * 6}],
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            }
+        ]
+
+        body = {"requests": requests}
+        sh.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+        print(f"Successfully cleared background for row {row} in sheet {driver_name}")
+
+    except HttpError as e:
+        print(f"Error clearing background color: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred: {e}")
+
+
+def highlight_broker_cell(driver_name: str, row: int):
+    """Sets the background color of the broker cell (column G) to green."""
+    try:
+        # Get the sheetId for the given driver name (reusing logic from other functions)
+        spreadsheet_metadata = sh.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+        sheets_props = spreadsheet_metadata.get('sheets', [])
+        sheet_id = None
+        for s in sheets_props:
+            if s.get('properties', {}).get('title', '') == driver_name:
+                sheet_id = s.get('properties', {}).get('sheetId')
+                break
+
+        if sheet_id is None:
+            print(f"Could not find sheetId for driver to highlight broker: {driver_name}")
+            return
+
+        # Define the request to format just cell G in the specified row
+        requests = [
+            {
+                "updateCells": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": row - 1, # 0-based index
+                        "endRowIndex": row,
+                        "startColumnIndex": 6,  # Column G
+                        "endColumnIndex": 7
+                    },
+                    "rows": [{
+                        "values": [{
+                            "userEnteredFormat": {
+                                "backgroundColor": {"red": 0.8, "green": 1, "blue": 0.8} # Light Green
+                            }
+                        }]
+                    }],
+                    "fields": "userEnteredFormat.backgroundColor"
+                }
+            }
+        ]
+
+        body = {"requests": requests}
+        sh.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+        print(f"Successfully highlighted broker in row {row} for {driver_name}")
+
+    except HttpError as e:
+        print(f"Error highlighting broker cell: {e}")
+    except Exception as e:
+        print(f"An unexpected error occurred during broker highlight: {e}")

@@ -146,16 +146,37 @@ async def handle_accounting_email(update: Update, context: ContextTypes.DEFAULT_
     sheets.update_cell(driver, current_row, 'T', acc_email)
     await update.message.reply_text(f"✅ Email saved.\n\nNow, paste broker's **full company info** to create a customer file.", parse_mode="Markdown")
     return AWAIT_BROKER_INFO
+
 async def handle_broker_info(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     broker_name = context.user_data['collected_data'].get("Broker Name")
-    if not broker_name: await update.message.reply_text("Error: Broker name missing."); return ConversationHandler.END
+    driver = context.user_data.get("driver") # Get the driver name
+
+    if not broker_name or not driver:
+        await update.message.reply_text("Error: Broker name or driver missing."); return ConversationHandler.END
+    
     try:
-        with open(f"./customers/{broker_name}.txt", "w") as f: f.write(update.message.text)
+        # Save the broker's info to a local file
+        with open(f"./customers/{broker_name}.txt", "w") as f:
+            f.write(update.message.text)
         await update.message.reply_text(f"✅ New customer file for **{broker_name}** created.", parse_mode="Markdown")
-    except Exception as e: await update.message.reply_text(f"❌ Failed to save customer file: {e}")
+
+        # --- ADD THIS CALL RIGHT HERE ---
+        # Now that the info is saved, highlight the broker cell in the sheet
+        try:
+            current_row = sheets.get_current_cell(driver, column="A")
+            sheets.highlight_broker_cell(driver_name=driver, row=current_row)
+        except Exception as e:
+            # This is not a critical failure, so just log it.
+            print(f"Non-critical error: Failed to highlight broker cell. {e}")
+        # --- END OF ADDED CODE ---
+
+    except Exception as e:
+        await update.message.reply_text(f"❌ Failed to save customer file: {e}")
+    
     if os.path.exists(RC_TO_SIGN_PATH): os.remove(RC_TO_SIGN_PATH)
     if os.path.exists(SIGNED_RC_PATH): os.remove(SIGNED_RC_PATH)
     return ConversationHandler.END
+
 
 async def cancel(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     # This is the consistent message you want

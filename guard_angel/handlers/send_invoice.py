@@ -152,11 +152,31 @@ async def handle_email_decision(update: Update, context: ContextTypes.DEFAULT_TY
     if decision == "yes":
         await q.edit_message_caption(caption="🚀 Sending email...")
         try:
-            email_service.send_invoice_email(recipient_email=ud["broker_email"], cc_list=ud["cc_list"], subject=f'POD/Invoice Order {ud["load_num"]} Carrier KOLOBOK, INC. MC 1294648', load_num=ud["load_num"], attachment_path=ud["final_invoice_path"])
+            email_service.send_invoice_email(
+                recipient_email=ud["broker_email"],
+                cc_list=ud["cc_list"],
+                subject=f'POD/Invoice Order {ud["load_num"]} Carrier KOLOBOK, INC. MC 1294648',
+                load_num=ud["load_num"],
+                attachment_path=ud["final_invoice_path"]
+            )
             await q.edit_message_caption(caption="✅ Email sent successfully!")
-        except Exception as e: await q.edit_message_caption(caption=f"❌ Failed to send email: {e}")
-    else: await q.edit_message_caption(caption="✅ Invoice generated. Operation complete.")
-    if os.path.exists(ud.get("final_invoice_path", "")): os.remove(ud["final_invoice_path"])
+
+            # --- ADD THIS CALL RIGHT HERE ---
+            # After sending, try to clear the background color from the sheet
+            try:
+                sheets.clear_row_background(driver_name=ud["driver"], row=ud["row"])
+            except Exception as e:
+                # If this fails, just log it. Don't bother the user since the email was sent.
+                print(f"Non-critical error: Failed to clear sheet background. {e}")
+            # --- END OF ADDED CODE ---
+
+        except Exception as e:
+            await q.edit_message_caption(caption=f"❌ Failed to send email: {e}")
+    else:
+        await q.edit_message_caption(caption="✅ Invoice generated. Operation complete.")
+    
+    if os.path.exists(ud.get("final_invoice_path", "")):
+        os.remove(ud["final_invoice_path"])
     shutil.rmtree("./files_cash", ignore_errors=True)
     return ConversationHandler.END
 
