@@ -161,3 +161,47 @@ def highlight_broker_cell(driver_name: str, row: int):
         print(f"Error highlighting broker cell: {e}")
     except Exception as e:
         print(f"An unexpected error occurred during broker highlight: {e}")
+
+
+def add_bottom_border(driver_name: str, row: int):
+    """Adds a solid bottom border to a given row from column A to AA."""
+    try:
+        # Get the sheetId for the given driver name
+        spreadsheet_metadata = sh.spreadsheets().get(spreadsheetId=SHEET_ID).execute()
+        sheets_props = spreadsheet_metadata.get('sheets', [])
+        sheet_id = None
+        for s in sheets_props:
+            if s.get('properties', {}).get('title', '') == driver_name:
+                sheet_id = s.get('properties', {}).get('sheetId')
+                break
+
+        if sheet_id is None:
+            print(f"Could not find sheetId for driver to add border: {driver_name}")
+            return
+
+        # Define the request to update the bottom border of the specified range
+        requests = [
+            {
+                "updateBorders": {
+                    "range": {
+                        "sheetId": sheet_id,
+                        "startRowIndex": row - 1, # The API uses a 0-based index
+                        "endRowIndex": row,
+                        "startColumnIndex": 0,  # Column A
+                        "endColumnIndex": 27   # Through Column AA
+                    },
+                    "bottom": {
+                        "style": "SOLID",
+                        "width": 2, # This creates a solid, medium-thickness line
+                        "color": {"red": 0.0, "green": 0.0, "blue": 0.0} # Black
+                    }
+                }
+            }
+        ]
+
+        body = {"requests": requests}
+        sh.spreadsheets().batchUpdate(spreadsheetId=SHEET_ID, body=body).execute()
+        print(f"Successfully added bottom border to row {row} for {driver_name}")
+
+    except Exception as e:
+        print(f"An error occurred while adding border: {e}")

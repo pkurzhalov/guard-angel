@@ -63,6 +63,8 @@ def compilate_salary_company_driver(driver, start_row, start_date_ignored, end_d
     pdf.set_fill_color(74, 245, 44); pdf.cell(177, 15, f'Settlement Total: ${settlement:,.2f}', ln=1, align='C', fill=True)
     os.makedirs("./files_cash", exist_ok=True)
     pdf.output('./files_cash/1st_page.pdf')
+    return start_row + len(loads_data) - 1 # This returns the last processed row number
+
 
 def compilate_salary_page(driver, cell, fuel_start_date, fuel_end_date, totals, discount, insurance, insurance_d, trailer, trailer_d):
     # This is the full function body from your original file
@@ -126,3 +128,4 @@ def compilate_salary_page(driver, cell, fuel_start_date, fuel_end_date, totals, 
     pdf.set_font('helvetica', '', 8); pdf.cell(177, 10, 'Please see a fuel Transaction Report below...', ln=1, align='C')
     os.makedirs("./files_cash", exist_ok=True)
     pdf.output('./files_cash/1st_page.pdf')
+    return cell + len(loads_data) - 1 # This returns the last processed row number

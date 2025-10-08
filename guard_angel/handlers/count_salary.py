@@ -113,12 +113,21 @@ async def process_company_driver_salary(update: Update, context: ContextTypes.DE
     try:
         final_pdf_name = f"Statement_{driver}_{datetime.now().strftime('%m-%d-%Y')}.pdf"
         context.user_data.setdefault("temp_files", []).extend(["./files_cash/1st_page.pdf", final_pdf_name])
-        sheets.compilate_salary_company_driver(driver, cell, "", "")
+        
+        # Capture the last row number returned by the function
+        last_row = sheets.compilate_salary_company_driver(driver, cell, "", "")
+        
         os.rename("./files_cash/1st_page.pdf", final_pdf_name)
         await update.message.reply_text("Uploading to Google Drive...")
-        # **FIX**: Added column='X' for statements
         sheets.upload_file(final_pdf_name, driver, cell, column='X')
         sheets.update_cell(driver, cell, 'Y', 'no insurance')
+        
+        # Add the border after everything is done
+        try:
+            sheets.add_bottom_border(driver_name=driver, row=last_row)
+        except Exception as e:
+            print(f"Non-critical error: Failed to add border. {e}")
+
         with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
         await update.message.reply_text("✅ Statement created!")
     except Exception as e: await update.message.reply_text(f"❌ An error occurred: {e}")
@@ -129,7 +138,9 @@ async def process_owner_operator_salary(update: Update, context: ContextTypes.DE
     driver, cell = ud["driver"], ud["cell"]
     try:
         await update.message.reply_text("Generating final statement PDF...")
-        sheets.compilate_salary_page(
+        
+        # Capture the last row number returned by the function
+        last_row = sheets.compilate_salary_page(
             driver=driver, cell=cell, 
             fuel_start_date=ud.get("start_date"), fuel_end_date=ud.get("end_date"),
             totals=ud.get("totals", 0), discount=ud.get("discount", 0),
@@ -142,14 +153,20 @@ async def process_owner_operator_salary(update: Update, context: ContextTypes.DE
         merger = PdfMerger()
         merger.append(first_page_path)
         merger.append(fuel_pdf_path)
+
         merger.write(final_pdf_name)
         merger.close()
         
         await update.message.reply_text("Uploading to Google Drive...")
-        # **FIX**: Added column='X' for statements
         sheets.upload_file(final_pdf_name, driver, cell, column='X')
         sheets.update_cell(driver, cell, 'Y', ud["insurance_period_str"])
         
+        # Add the border after everything is done
+        try:
+            sheets.add_bottom_border(driver_name=driver, row=last_row)
+        except Exception as e:
+            print(f"Non-critical error: Failed to add border. {e}")
+
         with open(final_pdf_name, 'rb') as doc: await update.message.reply_document(document=doc)
         await update.message.reply_text("✅ Owner-Operator Statement created!")
     except Exception as e:
