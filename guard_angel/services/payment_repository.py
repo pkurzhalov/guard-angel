@@ -7,6 +7,7 @@ from .auth import spreadsheet_service as sh
 from ..config import settings
 from telegram.helpers import escape_markdown
 from . import core_sheets as sheets
+from datetime import datetime
 
 # NOTE: This uses the same pattern as your rate_confirmation.py service.
 _sheet_id_cache = {}
@@ -145,7 +146,9 @@ def create_master_prompt(payments: list, loads_data: dict) -> str:
         "Hello. I need you to act as an expert logistics accountant. Your task is to match bank statement payments to a list of unpaid loads. Here is the data:",
         "\n--- BANK PAYMENTS RECEIVED ---"
     ]
-    for p in payments:
+    # --- NEW: Sort payments by date to help the AI process them chronologically ---
+    sorted_payments = sorted(payments, key=lambda p: datetime.strptime(p['date'], "%b %d, %Y") if 'Pending' not in p['date'] else datetime.max)
+    for p in sorted_payments:
         prompt_lines.append(f"Amount: ${p['amount']:.2f}, Date: {p['date']}, Description: {p['description']}")
 
     prompt_lines.append("\n--- UNPAID LOADS ---")
@@ -160,9 +163,11 @@ def create_master_prompt(payments: list, loads_data: dict) -> str:
     prompt_lines.extend([
         "\n--- YOUR TASK ---",
         "1. Analyze both lists. Match each bank payment to the most likely unpaid load.",
-        "2. A match is likely if the payment amount is very close to the load's 'Total Due' and the payment description contains the broker's name (or a recognizable part of it).",
-        "3. Provide your response *ONLY* in the following JSON format. Do not add any other text, explanations, or code block markers.",
-        "4. CRITICAL: Ensure any backslash characters (`\\`) inside the JSON strings are correctly escaped as double backslashes (`\\\\`).", # <-- ADD THIS LINE
+        "2. A match is likely if the payment amount is very close to the load's 'Total Due' and the payment description contains the broker's name.",
+        # --- MODIFIED: Added a crucial new rule for FIFO logic ---
+        "3. **IMPORTANT RULE:** If you find multiple loads with the same 'Total Due' that could match a payment, you **must** assign the payment with the earliest date to the load with the earliest 'Delivery Date'. Follow a 'First-In, First-Out' logic.",
+        "4. Provide your response *ONLY* in the following JSON format. Do not add any other text, explanations, or code block markers.",
+        "5. CRITICAL: Ensure any backslash characters (`\\`) inside the JSON strings are correctly escaped as double backslashes (`\\\\`).",
         """
 {
   "matched_loads": [
@@ -188,6 +193,9 @@ def create_master_prompt(payments: list, loads_data: dict) -> str:
     ])
     
     return "\n".join(prompt_lines)
+
+
+
 
 async def fetch_loads_data(range_text: str) -> dict | str:
     """
