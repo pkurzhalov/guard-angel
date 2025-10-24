@@ -65,8 +65,15 @@ async def handle_quarter(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
 async def handle_fuel_pdf(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
     await update.message.reply_text("Processing fuel statement...")
     file = await update.message.document.get_file()
-    pdf_path = f"./files_cash/ifta_fuel_{update.effective_user.id}.pdf"
-    context.user_data['temp_file'] = pdf_path # Add this line
+
+    # Define the directory and filename
+    cash_dir = "./files_cash"
+    pdf_path = f"{cash_dir}/ifta_fuel_{update.effective_user.id}.pdf"
+
+    # 🌟 FIX: Create the directory if it doesn't exist 🌟
+    os.makedirs(cash_dir, exist_ok=True)
+
+    context.user_data['temp_file'] = pdf_path
     await file.download_to_drive(pdf_path)
 
     result_text = ifta_service.parse_fuel_statement(pdf_path)

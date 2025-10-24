@@ -62,8 +62,8 @@ def write_load_to_sheet(driver: str, data: dict, signed_rc_path: str) -> str | N
 
     sheets.update_cell(driver, next_row, 'K', str(total_miles)); sheets.update_cell(driver, next_row, 'L', f"{rpm:.2f}")
 
-    commission_map = {"Walter": 70, "Yura": 5, "Nestor": 67, "Javier": 70, "Denis": 70}
-    sheets.update_cell(driver, next_row, 'U', commission_map.get(driver, ""))
+    # Use the configured commission map from settings
+    sheets.update_cell(driver, next_row, 'U', settings.commission_map.get(driver, ""))
 
     # --- REFACTOR AND FIX START ---
     # 1. Define the data for the main cell formatting request as a separate variable.

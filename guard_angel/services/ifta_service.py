@@ -23,7 +23,7 @@ def create_progress_bar(current: int, total: int, length: int = 20) -> str:
     bar = '█' * filled_length + '─' * (length - filled_length)
     return f"Processing routes... {current}/{total}\n`[{bar}] {percent:.0%}`"
 
-# --- FUEL PARSING LOGIC (This part is correct) ---
+# --- FUEL PARSING LOGIC (Refactored to handle Reefer vs. Engine fuel) ---
 def parse_fuel_statement(pdf_path: str) -> str:
     try:
         pdf_reader = PdfReader(pdf_path)
@@ -33,35 +33,104 @@ def parse_fuel_statement(pdf_path: str) -> str:
         current_state = "XX"
         parsing_active = True
         VALID_STATES = ["AL", "AZ", "AR", "CA", "CO", "CT", "DE", "FL", "GA", "ID", "IL", "IN", "IA", "KS", "KY", "LA", "ME", "MD", "MA", "MI", "MN", "MS", "MO", "MT", "NE", "NV", "NH", "NJ", "NM", "NY", "NC", "ND", "OH", "OK", "OR", "PA", "RI", "SC", "SD", "TN", "TX", "UT", "VT", "VA", "WA", "WV", "WI", "WY"]
+
+        # Updated patterns to capture the fuel type for separation
         state_pattern = re.compile(r'.*?([A-Z]{2})\s*[\d\s.]*?(?:ULSD|ULSR|FUEL|RFR)')
+
+        # This pattern captures the fuel type keyword in group 1
+        fuel_type_pattern = re.compile(r'(ULSD|FUEL|ULSR|RFR)')
+
         quantity_pattern = re.compile(r'\s(0\.\d{2,3}?)(\d*\.\d{2})')
+
         for line in lines:
             if "Amount Quantity Avg PPU" in line or line.startswith("Total Fuel"):
                 parsing_active = False; continue
             if not parsing_active: continue
+
+            # 1. Update State Context
             state_match = state_pattern.search(line)
             if state_match and state_match.group(1) in VALID_STATES:
                 current_state = state_match.group(1)
-            if re.search(r'(ULSD|ULSR|FUEL|RFR)', line):
+
+            # 2. Check for Fuel Transaction (and determine type)
+            type_match = fuel_type_pattern.search(line)
+            if type_match:
+                fuel_keyword = type_match.group(1)
+
+                # Assign type based on the keyword
+                if fuel_keyword in ["ULSD", "FUEL"]:
+                    fuel_type = "ENGINE" # Taxable, goes to IFTA
+                elif fuel_keyword in ["ULSR", "RFR"]:
+                    fuel_type = "REEFER" # Non-taxable, separate output
+                else:
+                    continue # Should not happen with current pattern
+
+                # Extract Quantity
                 qty_match = quantity_pattern.search(line)
                 if qty_match:
                     try:
                         quantity = float(qty_match.group(2))
-                        if quantity > 0: transactions.append({'State': current_state, 'Qty': quantity})
+                        if quantity > 0:
+                            transactions.append({
+                                'State': current_state,
+                                'Qty': quantity,
+                                'Type': fuel_type # New field
+                            })
                     except (ValueError, TypeError): continue
+
         if not transactions: return "Parsing complete. No transactions were found."
+
         df = pd.DataFrame(transactions)
-        state_totals = df.groupby('State')['Qty'].sum().sort_index()
-        calculated_total = df['Qty'].sum()
-        result_text = "⛽ **Gallons per State:**\n------------------\n"
-        for state, total in state_totals.items():
-            result_text += f"**{state}:** {total:.2f}\n"
-        result_text += f"------------------\n**Total Gallons:** {calculated_total:.2f}\n"
+
+        # Group by both State AND Type
+        state_type_totals = df.groupby(['Type', 'State'])['Qty'].sum().sort_index()
+
+        result_text = "⛽ **Fuel Gallons per State:**\n------------------\n"
+
+        # --- ENGINE FUEL (Taxable, for IFTA) ---
+        engine_fuel_text = "🚚 **Engine Fuel (IFTA Taxable):**\n"
+        engine_total = 0
+
+        if 'ENGINE' in state_type_totals.index.get_level_values('Type'):
+            engine_totals_series = state_type_totals.loc['ENGINE']
+
+            # 🌟 CHANGE: Sort the totals series 🌟
+            sorted_engine_totals = engine_totals_series.sort_values(ascending=False)
+
+            for state, total in sorted_engine_totals.items():
+                engine_fuel_text += f"**{state}:** {total:.2f}\n"
+                engine_total += total
+        else:
+            engine_fuel_text += "No Engine Fuel transactions found.\n"
+
+        engine_fuel_text += f"------------------\n**Engine Total Gallons:** {engine_total:.2f}\n"
+        result_text += engine_fuel_text + "\n"
+
+        # --- REEFER FUEL (Non-taxable) ---
+        reefer_fuel_text = "❄️ **Reefer Fuel (Non-Taxable):**\n"
+        reefer_total = 0
+
+        if 'REEFER' in state_type_totals.index.get_level_values('Type'):
+            reefer_totals_series = state_type_totals.loc['REEFER']
+
+            # 🌟 CHANGE: Sort the totals series 🌟
+            sorted_reefer_totals = reefer_totals_series.sort_values(ascending=False)
+
+            for state, total in sorted_reefer_totals.items():
+                reefer_fuel_text += f"**{state}:** {total:.2f}\n"
+                reefer_total += total
+        else:
+            reefer_fuel_text += "No Reefer Fuel transactions found.\n"
+
+        reefer_fuel_text += f"------------------\n**Reefer Total Gallons:** {reefer_total:.2f}\n"
+        result_text += reefer_fuel_text
+
         return result_text
+
     except Exception as e:
         return f"❌ An unexpected error occurred during fuel parsing: {e}"
 
-# --- MILEAGE CALCULATION LOGIC (Replicated from your state_miles.py) ---
+# --- MILEAGE CALCULATION LOGIC (No changes needed, kept for context) ---
 OSRM_URL = "https://router.project-osrm.org/route/v1/driving/{lon1},{lat1};{lon2},{lat2}?overview=full&geometries=geojson"
 STATE_ABBR = {"Alabama":"AL","Alaska":"AK","Arizona":"AZ","Arkansas":"AR","California":"CA","Colorado":"CO","Connecticut":"CT","Delaware":"DE","Florida":"FL","Georgia":"GA","Hawaii":"HI","Idaho":"ID","Illinois":"IL","Indiana":"IN","Iowa":"IA","Kansas":"KS","Kentucky":"KY","Louisiana":"LA","Maine":"ME","Maryland":"MD","Massachusetts":"MA","Michigan":"MI","Minnesota":"MN","Mississippi":"MS","Missouri":"MO","Montana":"MT","Nebraska":"NE","Nevada":"NV","New Hampshire":"NH","New Jersey":"NJ","New Mexico":"NM","New York":"NY","North Carolina":"NC","North Dakota":"ND","Ohio":"OH","Oklahoma":"OK","Oregon":"OR","Pennsylvania":"PA","Rhode Island":"RI","South Carolina":"SC","South Dakota":"SD","Tennessee":"TN","Texas":"TX","Utah":"UT","Vermont":"VT","Virginia":"VA","Washington":"WA","West Virginia":"WV","Wisconsin":"WI","Wyoming":"WY"}
 
@@ -113,8 +182,6 @@ def _calculate_state_miles_for_route(origin: str, dest: str, states_gdf) -> dict
     except Exception as e:
         print(f"Error calculating state miles for {origin}->{dest}: {e}")
         return {}
-
-# Make sure to add the helper function create_progress_bar from above!
 
 async def calculate_quarterly_miles(driver: str, quarter: int, update: Update, context: ContextTypes.DEFAULT_TYPE) -> str:
     # This function must now be async

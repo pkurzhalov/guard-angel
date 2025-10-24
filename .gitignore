@@ -47,6 +47,7 @@ customers/
 # Generated docs/artifacts (defensive)
 *.pdf
 *.csv
+*.png  # <--- ADD THIS LINE
 
 # Local cache
 .cache/

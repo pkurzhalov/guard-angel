@@ -9,7 +9,9 @@ load_dotenv(find_dotenv(usecwd=True))
 
 class Settings(BaseSettings):
     model_config = SettingsConfigDict(env_file='.env', env_file_encoding='utf-8', extra='ignore')
-    
+
+    drivers_commission_raw: str = Field("", alias="DRIVERS_COMMISSION_RATES")
+    # ... existing fields ...
     bot_token: str = Field(..., alias="BOT_TOKEN")
     authorized_users_raw: str = Field(..., alias="AUTHORIZED_USERS")
     spreadsheet_id: str = Field(..., alias="SPREADSHEET_ID")
@@ -34,16 +36,32 @@ class Settings(BaseSettings):
     firefox_profile_path: str = Field(..., alias="FIREFOX_PROFILE_PATH")
     states_geojson_path: str = Field(..., alias="STATES_GEOJSON_PATH")
 
+
     @property
     def owner_operators(self) -> List[str]:
         return [d.strip() for d in self.drivers_owner_operator_raw.split(',') if d.strip()]
     @property
     def company_drivers(self) -> List[str]:
         return [d.strip() for d in self.drivers_company_raw.split(',') if d.strip()]
+
     @property
     def email_lookup_drivers(self) -> List[str]:
         return [d.strip() for d in self.email_lookup_drivers_raw.split(',') if d.strip()]
+
+    # Check the indentation here carefully! It should be 4 spaces.
     @property
+    def commission_map(self) -> Dict[str, int]:
+        commissions = {}
+        # Expected format: "Driver1:70,Driver2:5,..."
+        for item in self.drivers_commission_raw.split(','):
+            if ':' in item:
+                driver, rate = item.strip().split(':', 1)
+                if driver and rate.isdigit():
+                    commissions[driver.strip()] = int(rate.strip())
+        return commissions
+
+    @property
+
     def authorized_users(self) -> List[int]:
         return [int(x) for x in self.authorized_users_raw.split(',') if x.strip().isdigit()]
     @property
